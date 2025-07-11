@@ -117,7 +117,7 @@ class Scene(_Scene):
             # TODO: maybe replace self._asset_mesh_cache with object ids being considered for current collision check
             for obj_id, mesh_paths in self._asset_mesh_cache.items():
                 for mesh_path in mesh_paths:
-                    mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("__", "/")
+                    mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/")
                     mesh_transform = scene_graph_transform_get(
                         self._scene.graph, mesh_node_name, edge_batch=self.edge_batch, cache=self.cache)[0]
                     mesh_transforms[mesh_node_name] = mesh_transform
@@ -129,7 +129,7 @@ class Scene(_Scene):
                 for obj_id, mesh_paths in self._asset_mesh_cache.items():
                     for mesh_path in mesh_paths:
                         # recover node_name from mesh_path
-                        mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("__", "/")
+                        mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/")
                         mesh_transform = mesh_transforms[mesh_node_name]
                         if len(mesh_transform.shape) == 3:
                             mesh_transform = mesh_transform[env_id]
@@ -170,7 +170,7 @@ class Scene(_Scene):
         N_SPH_BASE = 100
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
-            fn = node_name.replace("object/", f"{query_obj_id}__") # double __ to seperate obj_id and node_name
+            fn = node_name.replace("object/", f"{query_obj_id}___") # triple _ to seperate obj_id and node_name
             path = os.path.join(default_mesh_folder, f"{fn}.stl")
             query_mesh = Mesh(
                 name=node_name,
@@ -726,7 +726,7 @@ class Scene(_Scene):
         for obj_id, asset in self.assets.items():
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
             for mesh_path in asset_mesh_paths:
-                mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("__", "/").replace("object/", f"{obj_id}/")
+                mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/").replace("object/", f"{obj_id}/")
                 mesh = Mesh(
                     name=mesh_node_name,
                     file_path=mesh_path,

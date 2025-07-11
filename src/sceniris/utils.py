@@ -306,7 +306,7 @@ def make_mesh_buffer(obj_id: str, obj_asset, io_buf=False, default_folder="/tmp/
         else:
             if not os.path.exists(default_folder):
                 os.makedirs(default_folder)
-            fn = node_name.replace("object/", f"{obj_id}__") # double __ to seperate obj_id and node_name
+            fn = node_name.replace("object/", f"{obj_id}___") # triple _ to seperate obj_id and node_name
             path = os.path.join(default_folder, f"{fn}.stl")
             mesh.export(path)
             paths.append(path)
