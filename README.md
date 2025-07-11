@@ -5,7 +5,7 @@ Sceniris is a procedural scene generation framework that generates a massive amo
 ### Installation
 
 1. Install [curobo](https://curobo.org/get_started/1_install_instructions.html)
-2. Install sceniris `pip install git+https://github.com/bdaiinstitute/sceniris`. You may need to review the [licence terms](https://github.com/NVlabs/scene_synthesizer?tab=readme-ov-file#installation) mentioned in scene_synthesizer
+2. Install sceniris `pip install git+https://github.com/bdaiinstitute/sceniris.git`. You may need to review the [licence terms](https://github.com/NVlabs/scene_synthesizer?tab=readme-ov-file#installation) mentioned in scene_synthesizer
 
 ### Usage
 - From config
