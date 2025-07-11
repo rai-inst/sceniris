@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sceniris"
+version = "0.1.0"
+dependencies = [
+    "numpy>=1.26.4",
+    "torch>=2.1.0",
+    "tqdm",
+    "scene_synthesizer[all]"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
