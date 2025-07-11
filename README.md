@@ -1,5 +1,5 @@
 ## Sceniris: a fast procedural scene generation framework
-Sceniris is a procedural scene generation framework that generates a massive amount of environment instances in a short time. [how fast?](#how-fast-is-sceniris). The framework is developed on top of [scene_syntheizer](https://github.com/NVlabs/scene_synthesizer) and [curobo](https://curobo.org/). Sceniris also supports more spatial relationships. The speedup mainly comes from three aspects: batched sampling, batched pose computation, and curobo's parallel collision checking.
+Sceniris is a procedural scene generation framework that generates a massive amount of environment instances in a short time. [How fast?](#how-fast-is-sceniris). The framework is developed on top of [scene_syntheizer](https://github.com/NVlabs/scene_synthesizer) and [curobo](https://curobo.org/). Sceniris also supports more spatial relationships. The speedup mainly comes from three aspects: batched sampling, batched pose computation, and curobo's parallel collision checking.
 
 
 ### Installation
@@ -76,4 +76,6 @@ scene.gen() # generate!!!
 
 
 ### How fast is Sceniris
+16384 env instances (13000+ valid) in just 30s
+
 ![Execution time comparision](media/time.png)
