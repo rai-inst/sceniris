@@ -6,7 +6,7 @@ import time
 from multiprocessing import Pool
 import psutil
 
-from scene_gen_asset import PlaneAsset
+from src.sceniris.asset import PlaneAsset
 from utils import scene_graph_transform_get
 from constraints import SurfaceRelation, TrackingTransform
 
@@ -26,8 +26,8 @@ if use_original_ss:
     from scene_synthesizer.assets import Asset
     from scene_synthesizer.scene import Scene
 else:
-    from scene_gen_scene import Scene
-    from scene_gen_asset import Asset
+    from src.sceniris.scene import Scene
+    from src.sceniris.asset import Asset
 
 from pose_generators import PositionIteratorList
 

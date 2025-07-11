@@ -69,6 +69,7 @@ cfg = {
 }
 scene = Scene.gen_from_cfg(cfg) # initialize a scene
 scene.gen() # generate!!!
+poses, joint_states, valid_env_mask = scene.export_scene_to_poses_and_joint_states() # optionally, dump object poses, joint states, and valid environments data
 ```
 
 - By step-by-step coding
