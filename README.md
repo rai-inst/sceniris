@@ -76,6 +76,9 @@ scene.gen() # generate!!!
 
 
 ### How fast is Sceniris
+For a similar env config:
+
 Sceniris: 16384 env instances (13000+ valid) in just 30 seconds
+
 Scene_synthesizer (with 10 multiprocessing): 64 env instances in 36 seconds
 ![Execution time comparision](media/time.png)
