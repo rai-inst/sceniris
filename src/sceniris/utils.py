@@ -350,7 +350,7 @@ def batch_transform_matrix_to_vectors(matrices, wxyz=True):
     pos = matrices[..., :3, 3].copy()
     pos.flags["WRITEABLE"] = True
     r = matrices[..., :3, :3].copy()
-    r.flags["WRITABLE"] = True
+    r.flags["WRITEABLE"] = True
     quat = R.from_matrix(r).as_quat() # xyzw
     if wxyz:
         quat = quat[..., [1, 2, 3, 0]]
