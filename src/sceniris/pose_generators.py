@@ -3,7 +3,7 @@ from numpy.typing import NDArray
 
 from scene_synthesizer.utils import sample_volume_mesh, sample_polygon
 
-from utils import sample_random_z_rotations, check_within_polygon
+from sceniris.utils import sample_random_z_rotations, check_within_polygon
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
