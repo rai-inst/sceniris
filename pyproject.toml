@@ -9,7 +9,8 @@ dependencies = [
     "numpy>=1.26.4",
     "torch>=2.1.0",
     "tqdm",
-    "scene_synthesizer[all]"
+    "trimesh[easy,recommend]",
+    "scene_synthesizer"
 ]
 
 [tool.setuptools.packages.find]

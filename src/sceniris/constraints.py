@@ -6,7 +6,7 @@ from scipy.spatial import ConvexHull
 from dataclasses import dataclass as _dataclass
 import shapely
 from copy import deepcopy
-from utils import (
+from sceniris.utils import (
     create_ring_polygon, 
     create_polygon_from_unordered_points,
     ROT_2D_90,

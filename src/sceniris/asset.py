@@ -13,7 +13,7 @@ from scene_synthesizer.assets import (
     TrimeshAsset as _TrimeshAsset
 )
 
-from utils import sample_random_z_rotations
+from sceniris.utils import sample_random_z_rotations
 from scene_synthesizer.utils import log
 
 class Asset(_Asset):

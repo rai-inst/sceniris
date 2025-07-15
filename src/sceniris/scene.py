@@ -33,13 +33,13 @@ try:
 except BaseException as E:
     _pyglet_app_run = utils.late_bind_exception(E)
 
-from pose_generators import (
+from sceniris.pose_generators import (
     PositionIteratorNone,
     PositionIteratorUniform, 
     OrientationGeneratorUniformAroundZ,
     PositionIterator2DCollection,
 )
-from utils import (
+from sceniris.utils import (
     point_to_translation_matrix,
     get_support_transforms,
     get_support_node_names,
@@ -51,8 +51,8 @@ from utils import (
     invalidate_scenegraph_cache,
 )
 
-from constraints import SurfaceRelation, TrackingTransform
-from src.sceniris.asset import Asset
+from sceniris.constraints import SurfaceRelation, TrackingTransform
+from sceniris.asset import Asset
 
 
 class Scene(_Scene):
