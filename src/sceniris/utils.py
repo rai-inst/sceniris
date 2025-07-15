@@ -347,8 +347,11 @@ def transform_matrix_to_vectors(matrix):
     return translation, quaternion
 
 def batch_transform_matrix_to_vectors(matrices, wxyz=True):
-    pos = matrices[..., :3, 3]
-    quat = R.from_matrix(matrices[..., :3, :3]).as_quat() # xyzw
+    pos = matrices[..., :3, 3].copy()
+    pos.flags["WRITEABLE"] = True
+    r = matrices[..., :3, :3].copy()
+    r.flags["WRITABLE"] = True
+    quat = R.from_matrix(r).as_quat() # xyzw
     if wxyz:
         quat = quat[..., [1, 2, 3, 0]]
     return pos, quat
