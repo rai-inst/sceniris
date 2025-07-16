@@ -63,7 +63,7 @@ class Scene(_Scene):
         robot_centric_frame_transforms = None, 
         collision_checker_backend: str = "curobo",
         tmp_mesh_file_folder: str = "/tmp/sceniris",
-        workspace_limit: list[list[float]] | None = None,
+        workspace_limits: list[list[float]] | None = None,
         cfg: dict[str, Any] = None,
         *args, 
         **kwargs
@@ -78,7 +78,7 @@ class Scene(_Scene):
         self.obj_pose_scenes = {}
         self.num_envs = num_envs
         self.env_size = env_size
-        self.workspace_limit = workspace_limit
+        self.workspace_limits = workspace_limits
         self.assets = {}
         self.edge_batch = {}
         self.joint_states = defaultdict(dict) # dict: obj_id -> dict: joint_id (f"{obj_id}/{joint_name}") -> value
@@ -697,12 +697,12 @@ class Scene(_Scene):
 
 
     def _init_trimesh_scene(self):
-        if self.workspace_limit is not None:
-            width = self.workspace_limit[1][0] - self.workspace_limit[0][0]
-            depth = self.workspace_limit[1][1] - self.workspace_limit[0][1]
+        if self.workspace_limits is not None:
+            width = self.workspace_limits[1][0] - self.workspace_limits[0][0]
+            depth = self.workspace_limits[1][1] - self.workspace_limits[0][1]
             center = (
-                (self.workspace_limit[1][0] + self.workspace_limit[0][0]) / 2,
-                (self.workspace_limit[1][1] + self.workspace_limit[0][1]) / 2,
+                (self.workspace_limits[1][0] + self.workspace_limits[0][0]) / 2,
+                (self.workspace_limits[1][1] + self.workspace_limits[0][1]) / 2,
                 0
             )
         else:
@@ -852,7 +852,7 @@ class Scene(_Scene):
                 If no transform (or identity), use the definition of https://scene-synthesizer.github.io/concepts/assets.html,
                 where left (-x) front (-y) bottom (-z), right (x) back (y) top (z)
                 This is useful to transform coordinate system to any robot centric view.
-            "workspace_limit": list<list<float>>: # [[minx, miny], [maxx, maxy]], will ignore env_size
+            "workspace_limits": list<list<float>>: # [[minx, miny], [maxx, maxy]], will ignore env_size
             "collision_checker_backend": str, # "curobo" or "trimesh"
         }
 
@@ -866,7 +866,7 @@ class Scene(_Scene):
             env_size=env_cfg.get("env_size", 1.0),
             robot_centric_frame_transforms=env_cfg.get("robot_centric_frame_transforms", None),
             collision_checker_backend=env_cfg.get("collision_checker_backend", "curobo"),
-            workspace_limit=env_cfg.get("workspace_limit", None)
+            workspace_limits=env_cfg.get("workspace_limits", None)
         )
         return scene
 
