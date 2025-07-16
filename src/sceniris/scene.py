@@ -58,11 +58,12 @@ from sceniris.asset import Asset
 class Scene(_Scene):
     def __init__(
         self, 
-        num_envs = 128, 
-        env_size = 1.0, 
+        num_envs: int = 128, 
+        env_size: float = 1.0, 
         robot_centric_frame_transforms = None, 
         collision_checker_backend: str = "curobo",
-        tmp_mesh_file_folder: str = "/tmp/sgv2",
+        tmp_mesh_file_folder: str = "/tmp/sceniris",
+        workspace_limit: list[list[float]] | None = None,
         cfg: dict[str, Any] = None,
         *args, 
         **kwargs
@@ -76,7 +77,8 @@ class Scene(_Scene):
         self.obj_available_cache = {}
         self.obj_pose_scenes = {}
         self.num_envs = num_envs
-        self.env_size = env_size # env size is only used for visualization
+        self.env_size = env_size
+        self.workspace_limit = workspace_limit
         self.assets = {}
         self.edge_batch = {}
         self.joint_states = defaultdict(dict) # dict: obj_id -> dict: joint_id (f"{obj_id}/{joint_name}") -> value
@@ -695,8 +697,20 @@ class Scene(_Scene):
 
 
     def _init_trimesh_scene(self):
+        if self.workspace_limit is not None:
+            width = self.workspace_limit[1][0] - self.workspace_limit[0][0]
+            depth = self.workspace_limit[1][1] - self.workspace_limit[0][1]
+            center = (
+                (self.workspace_limit[1][0] + self.workspace_limit[0][0]) / 2,
+                (self.workspace_limit[1][1] + self.workspace_limit[0][1]) / 2,
+                0
+            )
+        else:
+            width = depth = self.env_size
+            center = (0, 0, 0)
+
         self.add_object(
-            asset=PlaneAsset(width=self.env_size, depth=self.env_size),
+            asset=PlaneAsset(width=width, depth=depth, center=center),
             obj_id="_plane",
         )
         for obj_id in self._gen_node_order:
@@ -838,6 +852,7 @@ class Scene(_Scene):
                 If no transform (or identity), use the definition of https://scene-synthesizer.github.io/concepts/assets.html,
                 where left (-x) front (-y) bottom (-z), right (x) back (y) top (z)
                 This is useful to transform coordinate system to any robot centric view.
+            "workspace_limit": list<list<float>>: # [[minx, miny], [maxx, maxy]], will ignore env_size
             "collision_checker_backend": str, # "curobo" or "trimesh"
         }
 
@@ -848,9 +863,10 @@ class Scene(_Scene):
         scene = cls(
             cfg=cfg,
             num_envs=env_cfg["num_envs"],
-            env_size=env_cfg["env_size"],
+            env_size=env_cfg.get("env_size", 1.0),
             robot_centric_frame_transforms=env_cfg.get("robot_centric_frame_transforms", None),
             collision_checker_backend=env_cfg.get("collision_checker_backend", "curobo"),
+            workspace_limit=env_cfg.get("workspace_limit", None)
         )
         return scene
 
@@ -966,10 +982,6 @@ class Scene(_Scene):
 
         
         return placement_args
-
-    def gen_variants(self):
-        pass
-
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
         """Show scene using the trimesh viewer.
