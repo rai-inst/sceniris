@@ -827,17 +827,23 @@ class Scene(_Scene):
             self.valid_env_mask[invalid_env_ids] = False
         
 
-    def export_scene_to_poses_and_joint_states(self):
-        """_summary_
+    def export_scene_to_poses_and_joint_states(self, wxyz: bool = True):
+        """Export the generated scene instances to pure poses and joint states.
+
+        Args:
+            wxyz (bool): if True, quat is represented in scalar-first format (wxyz). Otherwise, xyzw.
 
         Returns:
             poses, joint_states, and a mask for valid envs
+            poses is a dict[object_id<str>, pose vector<np.ndarray>(shape N, 7)]
+            joint_states is a dict[object_id<str>, dict[joint_id<str>, state<np.ndarray>(shape N)]]
+            valid_env_mask is an np.ndarray shape (N), where True means the env at corresponding index is valid
         """
         poses = {}
         for obj_id in self.assets.keys():
             obj_world_T = scene_graph_transform_get(
                 self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
-            poses[obj_id] = np.concatenate(batch_transform_matrix_to_vectors(obj_world_T, wxyz=True), axis=-1) # (num_envs, 7)
+            poses[obj_id] = np.concatenate(batch_transform_matrix_to_vectors(obj_world_T, wxyz=wxyz), axis=-1) # (num_envs, 7)
 
         return poses, self.joint_states, self.valid_env_mask
 
