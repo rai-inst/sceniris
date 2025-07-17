@@ -49,6 +49,7 @@ from sceniris.utils import (
     batch_forward_kinematics,
     batch_transform_matrix_to_vectors,
     invalidate_scenegraph_cache,
+    homogeneous_inv_batch,
 )
 
 from sceniris.constraints import SurfaceRelation, TrackingTransform
@@ -106,6 +107,7 @@ class Scene(_Scene):
         if hasattr(self, "_curobo_world_ccheck") and self._curobo_world_ccheck is not None:
             # if no object is enabled, return all False (no collision)
             if sum(self._object_enabled.values()) == 0:
+                # print ("no object enabled, return all False (no collision)")
                 return torch.zeros(len(env_ids), dtype=torch.bool)
             # print ("collision checking")
             self._update_curobo_world_ccheck(update_transforms=True)
@@ -137,6 +139,7 @@ class Scene(_Scene):
                             mesh_transform = mesh_transform[env_id]
                         pose = Pose.from_matrix(mesh_transform.copy())
                         pose = torch.cat([pose.position, pose.quaternion], dim=1)[0].cpu()
+                        # create from Mesh, use mesh's pose (not the inverse)
                         mesh = Mesh(
                             name=mesh_node_name,
                             pose=pose,
@@ -169,7 +172,7 @@ class Scene(_Scene):
         query_node_name_T_mesh_list = query_obj_asset.node_named_geometries(use_collision_geometry=True)
         default_mesh_folder = "/tmp/sgv2"
         make_mesh_buffer(query_obj_id, query_obj_asset, default_folder=default_mesh_folder)
-        N_SPH_BASE = 100
+        N_SPH_BASE = 200
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
             fn = node_name.replace("object/", f"{query_obj_id}___") # triple _ to seperate obj_id and node_name
@@ -196,7 +199,7 @@ class Scene(_Scene):
             mesh_spheres.append(sph)
         
         # stack all parts' spheres
-        mesh_spheres = torch.cat(mesh_spheres, dim=2) # (N, N_parts, n_sph * n_parts, 4)
+        mesh_spheres = torch.cat(mesh_spheres, dim=2) # (N, horizon, n_sph * n_parts, 4)
 
         # query curobo
         collision_query_buffer = CollisionQueryBuffer.initialize_from_shape(
@@ -301,6 +304,7 @@ class Scene(_Scene):
 
             iter = 0
             env_ids: torch.Tensor = torch.arange(self.num_envs, dtype=torch.int32)
+            edge_key = (parent_id, obj_id)
             while iter < max_iter:
                 n_working_envs = len(env_ids)
                 if env_position_iterator is not None and isinstance(env_position_iterator, list) and len(env_position_iterator) > 0:
@@ -316,12 +320,14 @@ class Scene(_Scene):
                         if isinstance(env_pos_raw, dict): # PositionIteratorCollection
                             # skip invalid samples
                             if np.isnan(env_pos_raw["samples"]).any():
+                                failed_env_ids.append(env_idx)
                                 continue
                             pos_raw["samples"].append(env_pos_raw["samples"])
                             pos_raw["support_refs"].append(env_pos_raw["support_refs"])
                         else: # PositionIterator2D or PositionIteratorNone
                             # skip invalid samples
                             if np.isnan(env_pos_raw).any():
+                                failed_env_ids.append(env_idx)
                                 continue
                             pos_raw["samples"].append(env_pos_raw)
                             pos_raw["support_refs"].append(np.array([env_position_iterator[env_idx].support])) # could be None
@@ -397,10 +403,8 @@ class Scene(_Scene):
                         world_to_parent = world_to_parent[working_env_ids]
                 else:
                     world_to_parent = np.eye(4)
-                
-                # print ("world T parent shape", world_to_parent.shape)
+            
                 world_T = world_to_parent @ placement_T # T_w_obj
-                # print (f"{obj_id} world_T", world_T[:, :3, 3])
 
                 # st = time.time()
                 joint_values = []
@@ -434,12 +438,25 @@ class Scene(_Scene):
                 # Check collisions
                 # st = time.time()
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
+                # print (f"placing {obj_id} has collision", has_collision)
                 # print (f"collision check taken: {time.time() - st:.4f}s")
-                # print ("has collision shape", has_collision.size())
                 # is_valid = is_valid & ~has_collision
+
                 retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
                     retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
+                
+                if edge_key not in self.edge_batch:
+                    self.edge_batch[edge_key] = np.eye(4)
+                self.edge_batch[edge_key].flags["WRITEABLE"] = True
+                if len(placement_T.shape) == 3:
+                    if len(self.edge_batch[edge_key].shape) == 2:
+                        self.edge_batch[edge_key] = np.tile(self.edge_batch[edge_key], (self.num_envs, 1, 1))
+                    self.edge_batch[edge_key][working_env_ids] = placement_T
+                else:
+                    self.edge_batch[edge_key] = placement_T
+                self.edge_batch[edge_key].flags["WRITEABLE"] = False
+
                 env_ids = retry_env_ids
                 if len(env_ids) == 0:
                     log.debug(f"{obj_id} succesfully placed")
@@ -453,18 +470,6 @@ class Scene(_Scene):
             
 
             log.debug(f"Adding {obj_id} to {parent_id}")
-            edge_key = (parent_id, obj_id)
-            # print ("edge key", edge_key, placement_T)
-            if edge_key not in self.edge_batch:
-                self.edge_batch[edge_key] = np.eye(4)
-            self.edge_batch[edge_key].flags["WRITEABLE"] = True
-            if len(placement_T.shape) == 3:
-                if len(self.edge_batch[edge_key].shape) == 2:
-                    self.edge_batch[edge_key] = np.tile(self.edge_batch[edge_key], (self.num_envs, 1, 1))
-                self.edge_batch[edge_key][working_env_ids] = placement_T
-            else:
-                self.edge_batch[edge_key] = placement_T
-            self.edge_batch[edge_key].flags["WRITEABLE"] = False
             
             # use env0 transform to update trimesh scene
             trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
@@ -485,11 +490,10 @@ class Scene(_Scene):
 
             if obj_id not in self.assets:
                 self.assets[obj_id] = obj_asset
-
                 self._asset_mesh_cache[obj_id] = make_mesh_buffer(obj_id, obj_asset)
             
+            # update collision check things
             self._object_enabled[obj_id] = True
-
             # st = time.time()
             self._update_curobo_world_ccheck(update_transforms=True, update_enabled=True, update_obj_ids=[obj_id])
             # print (f"update curobo world ccheck taken: {time.time() - st:.4f}s")
@@ -757,6 +761,8 @@ class Scene(_Scene):
         )
         self._curobo_world_ccheck = WorldMeshCollision(self._curobo_world_coll_config)
         self._update_curobo_world_ccheck(update_transforms=False)
+        # for i, cfg in enumerate(self._curobo_world_configs):
+            # cfg.save_world_as_mesh(f"/workspace/tmp_world_mesh/world_{i}.obj")
 
     def _update_curobo_world_ccheck(
         self, 
@@ -774,8 +780,9 @@ class Scene(_Scene):
             for mesh_node_name in self._all_mesh_names[obj_id]:
                 # all envs have the same mesh indices
                 mesh_idx = self._curobo_world_ccheck.get_mesh_idx(mesh_node_name, env_idx=0)
+                # print (obj_id, mesh_node_name, mesh_idx)
                 if update_enabled:
-                    # all objects enabled, regardless of env_ids
+                    # all env_ids enabled
                     if enabled:
                         self._curobo_world_ccheck._mesh_tensor_list[2][:, mesh_idx] = 1
                     else:
@@ -785,7 +792,10 @@ class Scene(_Scene):
                         continue
                     mesh_transform = scene_graph_transform_get(
                         self._scene.graph, mesh_node_name, edge_batch=self.edge_batch, cache=self.cache)[0]
-                    pos, quat = batch_transform_matrix_to_vectors(mesh_transform, wxyz=True) # curobo uses wxyz
+                    # to directly modify _mesh_tensor_list[1] (mesh's world ccheck transform), use inverse transform
+                    # quat is wxyz
+                    pos, quat = batch_transform_matrix_to_vectors(homogeneous_inv_batch(mesh_transform), wxyz=True) 
+                    # pos, quat = batch_transform_matrix_to_vectors(mesh_transform, wxyz=True) 
                     t = np.concatenate([pos, quat], axis=-1)
                     t = torch.from_numpy(t).to(self._curobo_world_ccheck.tensor_args.device, dtype=torch.float32)
                     if env_ids is None:

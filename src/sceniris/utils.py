@@ -159,9 +159,14 @@ def homogeneous_inv_batch(matrices):
     Slightly faster than np.linalg.inv or trimesh.transformations.inverse_matrix.
     """
     # return np.linalg.inv(matrices)
-    res = np.tile(np.eye(4), (matrices.shape[0], 1, 1))
-    res[:, :3, :3] = matrices[:, :3, :3].swapaxes(1, 2) # RT
-    res[:, :3, 3:] = (-res[:, :3, :3]) @ (matrices[:, :3, 3:]) # -RT * t
+    if len(matrices.shape) == 2:
+        res = np.eye(4)
+        res[:3, :3] = matrices[:3, :3].swapaxes(0, 1) # RT
+        res[:3, 3:] = (-res[:3, :3]) @ (matrices[:3, 3:]) # -RT * t
+    else:
+        res = np.tile(np.eye(4), (matrices.shape[0], 1, 1))
+        res[:, :3, :3] = matrices[:, :3, :3].swapaxes(1, 2) # RT
+        res[:, :3, 3:] = (-res[:, :3, :3]) @ (matrices[:, :3, 3:]) # -RT * t
     return res
 
 _identity = np.eye(4)
@@ -353,7 +358,7 @@ def batch_transform_matrix_to_vectors(matrices, wxyz=True):
     r.flags["WRITEABLE"] = True
     quat = R.from_matrix(r).as_quat() # xyzw
     if wxyz:
-        quat = quat[..., [1, 2, 3, 0]]
+        quat = quat[..., [3, 0, 1, 2]]
     return pos, quat
 
 def batch_forward_kinematics(scene, joint_names=None, configuration=None, edge_batch=None, env_ids=None):
