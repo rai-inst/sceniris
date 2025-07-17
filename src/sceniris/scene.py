@@ -100,10 +100,25 @@ class Scene(_Scene):
         query_obj_T: NDArray, 
         env_ids: torch.Tensor | None = None,
         query_obj_joint_configs: dict[str, Any] | None = None
-    ):
+    ) -> torch.Tensor:
+        """
+        Collision check execution.
+
+        Args:
+            query_obj_id (str): The id of the object, "query object", to check if there is any collision with the rest of the scene.
+            query_obj_asset (trimesh.Scene): The asset of the object.
+            query_obj_T (NDArray): the obj_to_world transform of the object.
+            env_ids (torch.Tensor | None, optional): The env ids to check collision with. Defaults to None (all envs).
+            query_obj_joint_configs (dict[str, Any] | None, optional): 
+                The joint configs of the query object.
+
+        Returns:
+            torch.Tensor: (N,) bool tensor, where N is the number of envs. True means there is collision.
+        """
         tensor_args = TensorDeviceType()
         world_configs = []
 
+        # if curobo world ccheck is available, use it (used by generation from cfg)
         if hasattr(self, "_curobo_world_ccheck") and self._curobo_world_ccheck is not None:
             # if no object is enabled, return all False (no collision)
             if sum(self._object_enabled.values()) == 0:
@@ -112,6 +127,7 @@ class Scene(_Scene):
             # print ("collision checking")
             self._update_curobo_world_ccheck(update_transforms=True)
             world_ccheck = self._curobo_world_ccheck
+        # otherwise, create it every time from scratch (used by step by step scene generation))
         else:
             if len(self._asset_mesh_cache) < 1:
                 return torch.zeros(len(env_ids), dtype=torch.bool)
@@ -154,7 +170,7 @@ class Scene(_Scene):
             # TODO: update batch env
             world_ccheck = WorldMeshCollision(world_coll_config)
 
-        # TODO: copy this for cfg case and make it faster
+        # prepare query object
         if len(query_obj_T.shape) == 2:
             query_obj_T = np.tile(query_obj_T, (len(env_ids), 1, 1))
         query_obj_pose = torch.from_numpy(query_obj_T).to(torch.float32)
@@ -235,26 +251,32 @@ class Scene(_Scene):
         joint_states = None,
         **kwargs,
     ):
-        """Add objects and place them in a non-colliding pose on top of a support surface or inside a container.
+        """
+        This is modified from scene_synthesizer's `place_objects`.
+        Add objects and place them in a non-colliding pose on top of a support surface or inside a container.
 
         Args:
             obj_id_iterator (iterator): Iterator for sampling name of the object to place.
             obj_asset_iterator (iterator): Iterator for sampling asset to be placed.
             obj_position_iterator (iterator, optional): Iterator for sampling object positions in the support frame.
+            env_obj_position_iterator (iterator, optional): per-env object position iterator. This is used to accomodate
+                complex object placement constraints where per-env object position iterators are created.
             obj_orientation_iterator (iterator, optional): Iterator for sampling object orientation in the object asset frame.
-            parent_id (str): Name of the node in the scene graph at which to attach the object. Or None if same as support node. Defaults to None.
+            parent_id (str): Name of the node in the scene graph at which to attach the object. 
+                Or None if same as support node. Defaults to None.
             max_iter (int, optional): Maximum number of attempts to find a placement pose. Defaults to 100.
-            max_iter_per_support (int, optional): Maximum number of attempts per support surface. Defaults to 10.
+            max_iter_per_support (int, optional): Not used. All supports are jointly sampled in the underlying 2D position sampler.
             distance_above_support (float, optional): Distance the object mesh will be placed above the support surface. Defaults to 0.002.
-            joint_type (str, optional): The type of joint that will be used to connect this object to the scene ("floating" or "fixed"). None has a similar effect as "fixed". Defaults to "floating".
-            valid_placement_fn (function, optional): Function for testing valid placements. Defaults to returning True.
-            debug (bool, optional): In case the placement is not valide, this will show a window with a scene with the attempted object placement. Defaults to False.
+            joint_type (str, optional): The type of joint that will be used to connect this object to the scene ("floating" or "fixed"). 
+                None has a similar effect as "fixed". Defaults to "floating".
+            valid_placement_fn (function, optional): Not used.
+            debug (bool, optional): Not used.
 
             **use_collision_geometry (bool, optional): Defaults to default_use_collision_geometry.
             **kwargs: Keyword arguments that will be delegated to add_object.
 
         Returns:
-            bool: Success.
+            ndarray: env ids wher objects are **not** successfully placed.
         """
         use_collision_geometry = kwargs.pop('use_collision_geometry', self._default_use_collision_geometry)
         for obj_id, obj_asset, in zip(obj_id_iterator, obj_asset_iterator):
@@ -608,8 +630,11 @@ class Scene(_Scene):
 
         Args:
             configuration (NDArray): New configuration value(s).
-            obj_id (str, optional): Object identifier to configure. If None and joint_ids=None, all joints in the scene are expected to be updated. Defaults to None.
-            joint_ids (list[str], optional): List of joint names to update. If None, all joints of the object are expected to be updated. Defaults to None.
+            obj_id (str, optional): Object identifier to configure. If None and joint_ids=None, all joints in the scene 
+                are expected to be updated. Defaults to None.
+            joint_ids (list[str], optional): List of joint names to update. If None, all joints of the object are 
+                expected to be updated. Defaults to None.
+            env_ids (NDArray, optional): The env ids to update. Defaults to None, updating all envs.
         """
         if env_ids is None:
             env_ids = np.arange(self.num_envs, dtype=np.int32)
@@ -649,12 +674,20 @@ class Scene(_Scene):
     
     @classmethod
     def gen_from_cfg(cls, cfg: dict[str, Any], **kwargs):
+        """Generate scene from cfg.
+
+        Args:
+            cfg (dict[str, Any]): The scene gen cfg.
+            **kwargs: Keyword arguments that will overwrite cfg.
+        """
         # merge override kwargs
         for k, v in kwargs.items():
             cfg[k] = v
         
+        # create scene instance from cfg
         scene = cls.init_from_env_cfg(cfg)
 
+        # initialize assets, gen tree, trimesh scene, and collision checker
         scene._load_assets()
         scene._build_gen_tree()
         scene._init_trimesh_scene()
@@ -701,6 +734,13 @@ class Scene(_Scene):
 
 
     def _init_trimesh_scene(self):
+        """
+        Initialize the trimesh scene for the case where the scene is generated from cfg.
+        This automatically adds a plane at z=0.
+        If there are workspace limits (specified by `workspace_limits` in env_cfg, [[minx, miny], [maxx, maxy]]), 
+        the plane will be initialized by the workspace limits.
+        Otherwise, the plane will be initialized by the env_size, centered at (0, 0, 0) by default.
+        """
         if self.workspace_limits is not None:
             width = self.workspace_limits[1][0] - self.workspace_limits[0][0]
             depth = self.workspace_limits[1][1] - self.workspace_limits[0][1]
@@ -729,6 +769,9 @@ class Scene(_Scene):
                 )
 
     def _init_collision_checker(self):
+        """
+        Initialize collision checker. Currently only curobo is supported.
+        """
         if self.collision_checker_backend == "curobo":
             self._curobo_world_configs = None
             self._curobo_world_coll_config = None
@@ -738,8 +781,11 @@ class Scene(_Scene):
             raise ValueError(f"Unsupported collision checker backend: {self.collision_checker_backend}")
 
     def _init_collision_checker_curobo(self):
+        """
+        Initialize curobo collision check. Assemble world configs and world mesh collision config. 
+        The object meshes are provided, with all poses set to identity, and all objects are disabled.
+        """
         tensor_args = TensorDeviceType()
-
         env_meshes = [[] for _ in range(self.num_envs)]
         for obj_id, asset in self.assets.items():
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
@@ -761,8 +807,6 @@ class Scene(_Scene):
         )
         self._curobo_world_ccheck = WorldMeshCollision(self._curobo_world_coll_config)
         self._update_curobo_world_ccheck(update_transforms=False)
-        # for i, cfg in enumerate(self._curobo_world_configs):
-            # cfg.save_world_as_mesh(f"/workspace/tmp_world_mesh/world_{i}.obj")
 
     def _update_curobo_world_ccheck(
         self, 
@@ -771,6 +815,15 @@ class Scene(_Scene):
         update_obj_ids: list[str] = [],
         env_ids = None,
     ):
+        """Update the curobo world ccheck. This is only used by generation from cfg and collision check backend=curobo, 
+        where `self._curobo_world_ccheck` is available.
+
+        Args:
+            update_enabled (bool): Whether to update the enabled state of the objects.
+            update_transforms (bool): Whether to update the transforms of the objects.
+            update_obj_ids (list[str]): The object ids to update.
+            env_ids (NDArray, optional): The env ids to update. Defaults to None, updating all envs.
+        """
         if not hasattr(self, "_curobo_world_ccheck") or self._curobo_world_ccheck is None:
             return
         
@@ -808,7 +861,10 @@ class Scene(_Scene):
                         self._curobo_world_ccheck._mesh_tensor_list[1][eids, mesh_idx, :7] = t
 
     def gen(self):
-        """execute generation tree and output poses"""
+        """
+        Execute generation tree. The generated env instances will be stored in the attributes of this class instance.
+        Use `export_scene_to_poses_and_joint_states` to get the poses, joint states, and the valid env mask.
+        """
         # reset valid env mask
         self.valid_env_mask[:] = True
         # reset enabled objects in collision checker
@@ -835,7 +891,6 @@ class Scene(_Scene):
                 **placement_args,
             )
             self.valid_env_mask[invalid_env_ids] = False
-        
 
     def export_scene_to_poses_and_joint_states(self, wxyz: bool = True):
         """Export the generated scene instances to pure poses and joint states.
@@ -995,16 +1050,19 @@ class Scene(_Scene):
                 placement_args["constraint"] = c
         else:
             placement_args["constraint"] = None
-
-        
         return placement_args
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
         """Show scene using the trimesh viewer.
 
         Args:
-            layers (list[str], optional): Filter to show only certain layers, e.g. 'visual' or 'collision'. Defaults to None, showing everything.
-            other_scene (trimesh.Scene, optional): Another trimesh scene that will be appended to the scene itself. Defaults to None.
+            layers (list[str], optional): Filter to show only certain layers, e.g. 'visual' or 'collision'. 
+                Defaults to None, showing everything.
+            other_scene (trimesh.Scene, optional): Another trimesh scene that will be appended to the scene itself. 
+                Defaults to None.
+            env_ids (NDArray[np.int32], optional): The env ids to show. Defaults to None, showing env 0.
+            enable_viewer (bool, optional): Whether to use the viewer. Defaults to True. 
+                If False, export the scene to html.
 
         Returns:
             trimesh.viewer.windowed.SceneViewer: The viewer.
