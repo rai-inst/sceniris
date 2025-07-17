@@ -16,6 +16,12 @@ from scene_synthesizer.constants import EDGE_KEY_METADATA
 def batch_rotation_matrix(angle: NDArray, direction: NDArray) -> NDArray:
     """
     Creates a batch of rotation matrices from a batch of angles and directions.
+    Args:
+        angle (NDArray): (N,) float, the angle of rotation.
+        direction (NDArray): (N, 3) float, the direction of rotation.
+
+    Returns:
+        NDArray: (N, 4, 4) float, the rotation matrices.
     """
     N = len(angle)
     
@@ -47,6 +53,15 @@ def batch_rotation_matrix(angle: NDArray, direction: NDArray) -> NDArray:
 
 
 def batch_translation_matrix(direction: NDArray) -> NDArray:
+    """
+    Creates a batch of translation matrices from a batch of 3D translations.
+
+    Args:
+        direction (NDArray): (N, 3) float, the direction of translation.
+
+    Returns:
+        NDArray: (N, 4, 4) float, the translation matrices.
+    """
     N = direction.shape[0]
     matrices = np.tile(np.eye(4), (N, 1, 1))
     matrices[:, :3, 3] = direction
@@ -465,6 +480,19 @@ def create_ring_polygon(
     dir_end: NDArray | None = None, 
     split: int = 36
 ) -> Polygon:
+    """Create a polygon that approximates a ring.
+
+    Args:
+        center (NDArray): shape (2,), the center of the ring.
+        inner_r (float): the inner radius of the ring.
+        outer_r (float): the outer radius of the ring.
+        dir_start (NDArray | None, optional): shape (2,), the start direction of the ring. Defaults to None.
+        dir_end (NDArray | None, optional): shape (2,),the end direction of the ring. Defaults to None.
+        split (int, optional): controls how many points along the circle to approximate the ring. Defaults to 36.
+
+    Returns:
+        Polygon: ring polygon
+    """
     shell, hole = [], []
     if dir_start is None and dir_end is None:
         rad = np.linspace(0, np.pi*2, split)
@@ -487,6 +515,14 @@ def create_ring_polygon(
 
 
 def normalize_direction_vector(direction: NDArray) -> NDArray:
+    """Normalize a direction vector
+
+    Args:
+        direction (NDArray): shape (2,), the direction vector to normalize.
+
+    Returns:
+        NDArray: shape (2,), the normalized direction vector.
+    """
     if not np.isclose(np.linalg.norm(direction), 1.0):
         direction = direction / (np.linalg.norm(direction) + 1e-5)
     return direction
@@ -500,6 +536,19 @@ def create_region_polygon(
     distance_end: float | None = None,
     size: float = 100.0,
 ) -> Polygon:
+    """Create a polygon that approximates a region.
+
+    Args:
+        center (NDArray): shape (2,), the center of the region.
+        dir_start (NDArray): shape (2,), the start direction of the region.
+        dir_end (NDArray): shape (2,), the end direction of the region.
+        distance_start (float | None, optional): the start distance of the region. Defaults to None.
+        distance_end (float | None, optional): the end distance of the region. Defaults to None.
+        size (float, optional): the size of the region. Defaults to 100.0.
+
+    Returns:
+        Polygon: region polygon
+    """
     dir_start = normalize_direction_vector(dir_start)
     dir_end = normalize_direction_vector(dir_end)
     if distance_start is None and distance_end is None:
@@ -537,6 +586,14 @@ def create_region_polygon(
 
 
 def create_polygon_from_unordered_points(points: NDArray) -> Polygon:
+    """Create a polygon from unordered points.
+
+    Args:
+        points (NDArray): shape (N, 2), the unordered points.
+
+    Returns:
+        Polygon: polygon
+    """
     mean = np.mean(points, axis=0)
     vec = points - mean
     rad = np.arctan2(vec[:, 1], vec[:, 0])
@@ -598,6 +655,14 @@ ROT_2D_315 = np.array(
 )
 
 def resolve_multi_polygon(polygon: MultiPolygon) -> list[Polygon]:
+    """Reduce a multi-polygon to a list of polygons.
+
+    Args:
+        polygon (MultiPolygon): the multi-polygon to reduce.
+
+    Returns:
+        list[Polygon]: the list of polygons.
+    """
     return list(
             itertools.chain(
                 [resolve_multi_polygon(p) if isinstance(p, MultiPolygon) else p for p in polygon.geoms]
