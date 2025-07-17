@@ -17,6 +17,9 @@ from sceniris.utils import sample_random_z_rotations
 from scene_synthesizer.utils import log
 
 class Asset(_Asset):
+    """
+    Override the scene_synthesizer's Asset class to support batch stable pose sampling, and get each mesh's geometry.
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

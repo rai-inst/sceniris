@@ -41,7 +41,7 @@ class SurfaceRelation:
         distance_start_bbox: bool = True,
         max_mesh_projection_z: float = 1.0
     ):
-        """_summary_
+        """Define a surface relation. By calling `.scene_supports`, the scene supports will be computed.
 
         Args:
             scene: scene object

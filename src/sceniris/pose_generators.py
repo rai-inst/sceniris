@@ -12,6 +12,10 @@ if TYPE_CHECKING:
 
 DEFAULT_REPLISH_SIZE = 2
 
+"""
+This file defines new pose generators that support batch generation and caching compared to scene_synthesizer.
+"""
+
 class PoseGenerator:
     def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
         self.rng = np.random.default_rng(seed)
