@@ -81,7 +81,15 @@ class Asset(_Asset):
         else:
             return poses[indices]
         
-    def _filter_collision_geometry(self, node_names):
+    def _filter_collision_geometry(self, node_names: list[str]) -> list[str]:
+        """Filter the node names to only include collision geometry.
+
+        Args:
+            node_names (list[str]): The node names to filter.
+
+        Returns:
+            list[str]: The filtered node names.
+        """
         filtered_node_names = []
         for name in node_names:
             if "visuals" in name:
@@ -94,12 +102,25 @@ class Asset(_Asset):
         return filtered_node_names
         
     @property
-    def collision_node_names(self):
+    def collision_node_names(self) -> list[str]:
+        """Get all the collision geometry node names of the asset.
+
+        Returns:
+            list[str]: The collision geometry node names.
+        """
         scene = self.as_trimesh_scene(use_collision_geometry=True)
         node_names = scene.graph.nodes_geometry
         return self._filter_collision_geometry(node_names)
 
-    def node_named_geometries(self, use_collision_geometry=True):
+    def node_named_geometries(self, use_collision_geometry=True) -> list[tuple[str, NDArray, trimesh.Trimesh]]:
+        """Get the node name, transform, and the geometry of each sub node in the asset.
+
+        Args:
+            use_collision_geometry (bool, optional): whether to use collision geometry. Defaults to True.
+
+        Returns:
+            list[tuple[str, NDArray, trimesh.Trimesh]]: The node name, transform, and the geometry of each sub node.
+        """
         # don't know why this use_collision_geometry is not working in scene_synthesizer
         # so we need to filter the collision geometry manually
         scene = self.as_trimesh_scene(use_collision_geometry=use_collision_geometry)
@@ -114,6 +135,7 @@ class Asset(_Asset):
         return node_name_T_mesh_list
 
 
+# override scene_synthesizer's Asset classes to use our modified Asset class
 class URDFAsset(_URDFAsset, Asset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
