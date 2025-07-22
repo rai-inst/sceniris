@@ -122,9 +122,7 @@ class Scene(_Scene):
         if hasattr(self, "_curobo_world_ccheck") and self._curobo_world_ccheck is not None:
             # if no object is enabled, return all False (no collision)
             if sum(self._object_enabled.values()) == 0:
-                # print ("no object enabled, return all False (no collision)")
                 return torch.zeros(len(env_ids), dtype=torch.bool)
-            # print ("collision checking")
             self._update_curobo_world_ccheck(update_transforms=True)
             world_ccheck = self._curobo_world_ccheck
         # otherwise, create it every time from scratch (used by step by step scene generation))
@@ -167,7 +165,6 @@ class Scene(_Scene):
             world_coll_config = WorldCollisionConfig(
                 tensor_args, world_model=world_configs
             )
-            # TODO: update batch env
             world_ccheck = WorldMeshCollision(world_coll_config)
 
         # prepare query object
@@ -695,14 +692,17 @@ class Scene(_Scene):
 
         return scene
 
-    def _load_assets(self):
+    def _load_assets(self) -> None:
+        """load assets from cfg."""
         cfg = self._cfg
         for obj_id, obj_cfg in cfg["objects"].items():
             asset_path = obj_cfg["asset_path"]
             self.assets[obj_id] = Asset(asset_path, origin=("center", "center", "bottom"))
         
 
-    def _build_gen_tree(self):
+    def _build_gen_tree(self) -> None:
+        """Build a generation tree from cfg by topo sort. Objects will follow the order of the topo sort result, 
+        in this case, generating from root node to leaf nodes."""
         # this graph is not the same as the scene graph stored in trimesh
         # this graph has extra edges that reflect the constraints to determine the order of placement
         cfg = self._cfg
@@ -733,7 +733,7 @@ class Scene(_Scene):
         self._gen_node_order = nodes
 
 
-    def _init_trimesh_scene(self):
+    def _init_trimesh_scene(self) -> None:
         """
         Initialize the trimesh scene for the case where the scene is generated from cfg.
         This automatically adds a plane at z=0.
@@ -768,7 +768,7 @@ class Scene(_Scene):
                     joint_type="floating"
                 )
 
-    def _init_collision_checker(self):
+    def _init_collision_checker(self) -> None:
         """
         Initialize collision checker. Currently only curobo is supported.
         """
@@ -780,7 +780,7 @@ class Scene(_Scene):
         else:
             raise ValueError(f"Unsupported collision checker backend: {self.collision_checker_backend}")
 
-    def _init_collision_checker_curobo(self):
+    def _init_collision_checker_curobo(self) -> None:
         """
         Initialize curobo collision check. Assemble world configs and world mesh collision config. 
         The object meshes are provided, with all poses set to identity, and all objects are disabled.
@@ -814,7 +814,7 @@ class Scene(_Scene):
         update_transforms: bool = True, 
         update_obj_ids: list[str] = [],
         env_ids = None,
-    ):
+    ) -> None:
         """Update the curobo world ccheck. This is only used by generation from cfg and collision check backend=curobo, 
         where `self._curobo_world_ccheck` is available.
 
@@ -833,7 +833,6 @@ class Scene(_Scene):
             for mesh_node_name in self._all_mesh_names[obj_id]:
                 # all envs have the same mesh indices
                 mesh_idx = self._curobo_world_ccheck.get_mesh_idx(mesh_node_name, env_idx=0)
-                # print (obj_id, mesh_node_name, mesh_idx)
                 if update_enabled:
                     # all env_ids enabled
                     if enabled:
@@ -848,7 +847,6 @@ class Scene(_Scene):
                     # to directly modify _mesh_tensor_list[1] (mesh's world ccheck transform), use inverse transform
                     # quat is wxyz
                     pos, quat = batch_transform_matrix_to_vectors(homogeneous_inv_batch(mesh_transform), wxyz=True) 
-                    # pos, quat = batch_transform_matrix_to_vectors(mesh_transform, wxyz=True) 
                     t = np.concatenate([pos, quat], axis=-1)
                     t = torch.from_numpy(t).to(self._curobo_world_ccheck.tensor_args.device, dtype=torch.float32)
                     if env_ids is None:
@@ -860,7 +858,7 @@ class Scene(_Scene):
                     else:
                         self._curobo_world_ccheck._mesh_tensor_list[1][eids, mesh_idx, :7] = t
 
-    def gen(self):
+    def gen(self) -> None:
         """
         Execute generation tree. The generated env instances will be stored in the attributes of this class instance.
         Use `export_scene_to_poses_and_joint_states` to get the poses, joint states, and the valid env mask.
@@ -879,11 +877,6 @@ class Scene(_Scene):
             placement_args = self._parse_obj_placement_cfg(object_cfg) 
             # placement_args: obj_position_iterator, obj_orientation_iterator, constraint, support_id
 
-            # for debug visualization constraint support polygons
-            # if placement_args["constraint"] is not None:
-            #     for i in range(0, 1):
-            #         self._scene.metadata["support_polygons"][f"constraint_support_{obj_id}_{i}"] = placement_args["constraint"].scene_supports[i]
-
             invalid_env_ids = self.place_object(
                 obj_id=obj_id,
                 obj_asset=self.assets[obj_id],
@@ -892,7 +885,10 @@ class Scene(_Scene):
             )
             self.valid_env_mask[invalid_env_ids] = False
 
-    def export_scene_to_poses_and_joint_states(self, wxyz: bool = True):
+    def export_scene_to_poses_and_joint_states(
+        self, 
+        wxyz: bool = True
+    ) -> tuple[dict[str, NDArray], dict[str, dict[str, NDArray]], NDArray]:
         """Export the generated scene instances to pure poses and joint states.
 
         Args:
@@ -1123,7 +1119,7 @@ class Scene(_Scene):
             with open("tmp/gen_scene.html", "w") as f:
                 f.write(html)
     
-    # only one-line change
+    # only one-line change of the super class
     def add_object(
         self,
         asset,
@@ -1174,6 +1170,6 @@ class Scene(_Scene):
             **kwargs
         )
     
-    # void this function to speed up
+    # void this function in the super class to speed up
     def sync_collision_manager(self):
         pass
