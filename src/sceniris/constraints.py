@@ -22,11 +22,9 @@ from scene_synthesizer.scene import SupportSurface
 @_dataclass
 class TrackingTransform:
     parent_id: str
-    transform: NDArray # parent_id's world transform
 
 class SurfaceRelation:
-    """Single surface relation
-    """
+    """Single surface relation"""
     def __init__(
         self,
         scene,
@@ -35,7 +33,7 @@ class SurfaceRelation:
         direction: str | NDArray | None = None,
         relation_axis_transform: str | NDArray = np.eye(4),
         direction_tolerance_angle: float = 90.0,
-        distance: float | Literal["next_to"] | None = None,
+        distance: float | None = None,
         distance_type: Literal["greater", "less", "equal"] | None = None,
         distance_relax: float = 0.01,
         distance_start_bbox: bool = True,
@@ -45,28 +43,32 @@ class SurfaceRelation:
 
         Args:
             scene: scene object
-            anchor_transforms (list[TrackingTransform]): _description_
-            world_to_surface_transforms (list[NDArray]): world to surface transform for each support surface.
-                It is used to transform the anchor transform to the surface coordinate system.
-                It must be provided if base_support is provided.
-            direction (str | NDArray | None, optional): _description_. Defaults to None.
-            distance (float | Literal["next_to"] | None, optional): _description_. Defaults to None.
-            distance_type (Literal["greater", "less", "equal"] | None, optional): _description_. 
-                Defaults to None.
-            distance_relax (float, optional): _description_. Defaults to 0.0.
-            base_support (list[SupportSurface] | None, optional): base support surface to consider surface relation.
-                Note: all polygons in SupportSurface are using 2D coordinates (local to its support node (mesh))
-                Defaults to None.
+            anchor_transforms (list[TrackingTransform]): anchor transforms.
+                It is used to define the anchor points of the surface relation. Usually their parent_id is the node
+                    that involves the relation.
+            base_support (list[SupportSurface]): base support surface to consider surface relation.
+                Note: all polygons in SupportSurface are using 2D coordinates (local to its support node (mesh)).
+            direction (str | NDArray | None, optional): direction wrt the anchor point(s). Defaults to None.
+            relation_axis_transform (str | NDArray, optional): if apply the transform on top of the base support 
+                transform. Defaults to np.eye(4), i.e., aligned with the surface. When it is a string, it can be a node 
+                in the scene graph.
+            distance (float | None, optional): distance to the anchor point(s). Defaults to None.
+            distance_type (Literal["greater", "less", "equal"] | None, optional): if it represents the area further than
+                the distance (`greater`), closer than (`less`), or equal (`equal`) to the distance. Defaults to None.
+                It is only used when distance is provided.
+            distance_relax (float, optional): if `distance_type=equal`, give it a relax so that points can be sampled. 
+                Usually the value is small. Defaults to 0.01.
             distance_start_bbox (bool, optional): Use the bbox of the mesh to compute the distance.
-                Expensive to compute, but reduces a lot of collisions.
+                Expensive to compute, but reduces potential collisions or give better candidate areas for large objects.
+            max_mesh_projection_z (float, optional): max z value in a mesh to consider bbox when 
+                `distance_start_bbox=True`. Points with z value greater than this value will be ignored. 
+                Defaults to 1.0. This is useful for placing objects under a part of another object, e.g., 
+                under a table or under an opened drawer.
         """
         self.scene = scene
         self.anchor_transforms = anchor_transforms
         self.num_envs = scene.num_envs
-        for anchor_transform in self.anchor_transforms:
-            if len(anchor_transform.transform.shape) == 2:
-                anchor_transform.transform = np.tile(anchor_transform.transform, (self.num_envs, 1, 1))
-        self.world_to_surface_transforms = []
+        self.world_to_surface_transforms = None
         self._true_anchor_transforms = []
         self.direction = direction
         if isinstance(self.direction, str):
@@ -88,25 +90,53 @@ class SurfaceRelation:
         self.init_world_to_surface_transforms()
 
     def init_world_to_surface_transforms(self):
+        """Initialize the transform converting support surface frame to world world frame.
+        `self.world_to_surface_transforms` is a (len(base_support), num_envs, 4, 4) numpy array.
+        """
+        world_to_surface_transforms = []
         for i in range(len(self.base_support)):
             support_node = self.base_support[i].node_name
-            # T_w_mesh
+            # T_w_mesh (coordinate, not frame, frame is T_mesh_w)
             mesh_transform = scene_graph_transform_get(self.scene.graph, support_node, edge_batch=self.scene.edge_batch, cache=self.scene.cache)[0]
-            # T_w_normalized = T_w_mesh @ T_mesh_normalized
+            # T_w_normalized = T_w_mesh @ T_mesh_normalized (coordinate, not frame)
             w_s = mesh_transform @ self.base_support[i].transform
             if len(w_s.shape) == 2:
                 w_s = np.tile(w_s, (self.num_envs, 1, 1))
-            self.world_to_surface_transforms.append(w_s)
-        self.world_to_surface_transforms = np.stack(self.world_to_surface_transforms, axis=0) # (len(base_support), num_envs, 4, 4))
+            world_to_surface_transforms.append(w_s)
+        self.world_to_surface_transforms = np.stack(world_to_surface_transforms, axis=0) # (len(base_support), num_envs, 4, 4))
 
     @staticmethod
-    def from_calculated_scene_supports(scene, scene_supports):
-        surface_relation = SurfaceRelation(scene, [], [], num_envs=scene.num_envs)
+    def from_calculated_scene_supports(scene, scene_supports: list[list[SupportSurface]]):
+        """copy a SurfaceRelation from calculated scene supports.
+
+        Args:
+            scene (Scene): scene object
+            scene_supports (list[list[SupportSurface]]): scene supports. The first level is env, 
+                the second level is surface.
+
+        Returns:
+            SurfaceRelation: a new SurfaceRelation object
+        """
+        surface_relation = SurfaceRelation(scene, [], [])
         surface_relation._scene_supports = scene_supports
         surface_relation._from_raw = False
         return surface_relation
 
-    def add_new_polygon_to_scene_support(self, scene_support, polygon, ori_support):
+    def add_new_polygon_to_scene_support(
+        self, 
+        scene_support: list[SupportSurface], 
+        polygon: Polygon, 
+        ori_support: SupportSurface
+    ) -> None:
+        """Add a new polygon to generated scene support that satisfies the surface relation. The condition is checked by
+        if the new polygon intersects with the original support surface. If so, the intersection will be computed and 
+        added to the scene support.
+
+        Args:
+            scene_support (list[SupportSurface]): list of scene supports that accepts new SupportSurface.
+            polygon (Polygon): the new polygon to add.
+            ori_support (SupportSurface): the original support surface.
+        """
         if shapely.intersects(ori_support.polygon, polygon):
             new_polygon = shapely.intersection(ori_support.polygon, polygon)
             if isinstance(new_polygon, shapely.MultiPolygon):
@@ -124,6 +154,21 @@ class SurfaceRelation:
         max_z: float = 1.0, 
         backend: Literal["scipy", "shapely"] = "scipy"
     ) -> Polygon:
+        """Compute the convex hull of the projected mesh vertices on the surface, with a max z value filtering out 
+            vertices higher than `max_z` (with respect to the surface).
+
+        Args:
+            points (NDArray): mesh vertices transformed to surface frame. (N, 3)
+            max_z (float, optional): max z value in a mesh to consider bbox when 
+                `distance_start_bbox=True`. Points with z value greater than this value will be ignored. 
+                Defaults to 1.0. This is useful for placing objects under a part of another object, e.g., 
+                under a table or under an opened drawer.
+            backend (Literal["scipy", "shapely"], optional): backend implementation of convex hull computation. 
+                Defaults to `scipy`, which is 200x faster than `shapely`.
+
+        Returns:
+            Polygon: convex hull of projected mesh vertices on the surface.
+        """
         if backend == "shapely":
             points = points[points[:, 2] < max_z]
             return shapely.convex_hull(shapely.MultiPoint(points))
@@ -141,6 +186,12 @@ class SurfaceRelation:
 
     @property
     def scene_supports(self) -> list[list[SupportSurface]]:
+        """Compute the scene supports that satisfy the surface relation.
+
+        Returns:
+            list[list[SupportSurface]]: scene supports that satisfy the surface relation. The first level is env, 
+                the second level is surface.
+        """
         # cache the scene supports, since the computation is expensive
         if self._scene_supports is not None:
             return self._scene_supports
@@ -390,8 +441,32 @@ class SurfaceRelation:
         # print (f"compute scene supports {time.time() - st:.4f}s")
         return scene_support_surfaces
     
-    def _group_supports_by_source(self, s1, s2):
+    def _group_supports_by_source(
+        self, 
+        s1: list[SupportSurface], 
+        s2: list[SupportSurface]
+    ) -> list[list[SupportSurface]]:
+        """Group the supports form two sources according to their surfaces. If any of two supports are from
+        the same source (identified by their surface transforms are identical (close for numerical purpose)), they will 
+        be grouped together.
+
+        Args:
+            s1 (list[SupportSurface]): supports from the first source.
+            s2 (list[SupportSurface]): supports from the second source.
+
+        Returns:
+            list[list[SupportSurface]]: grouped supports. The first level is same surface, the second level is supports.
+        """
         def find_close(all_t, t) -> int:
+            """Find the index of the closest transform in `all_t` to `t`.
+
+            Args:
+                all_t (list[NDArray]): list of transforms.
+                t (NDArray): the target transform.
+
+            Returns:
+                int: the index of the closest transform.
+            """
             for i, t_p in enumerate(all_t):
                 if np.allclose(t_p, t):
                     return i
@@ -411,6 +486,7 @@ class SurfaceRelation:
         return grouped_supports
 
     def __or__(self, other):
+        """Union the scene supports of two SurfaceRelation objects."""
         assert self.base_support[0].node_name == other.base_support[0].node_name, "Base support must be the same"
         scene_support_surfaces = [[] for _ in range(self.num_envs)]
         for env_idx in range(len(self._scene_supports)):
@@ -426,6 +502,7 @@ class SurfaceRelation:
         return SurfaceRelation.from_calculated_scene_supports(self.scene, scene_support_surfaces)
 
     def __and__(self, other):
+        """Intersect the scene supports of two SurfaceRelation objects."""
         assert self.base_support[0].node_name == other.base_support[0].node_name, "Base support must be the same"
         scene_support_surfaces = [[] for _ in range(self.num_envs)]
         for env_idx in range(len(self._scene_supports)):
