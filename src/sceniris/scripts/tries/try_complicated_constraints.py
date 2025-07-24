@@ -135,10 +135,10 @@ def generate_scene(i):
     constraint = SurfaceRelation(
         scene = my_scene,
         anchor_transforms = [
-            TrackingTransform(parent_id="drawer", transform=drawer_transform), 
-            TrackingTransform(parent_id="banana", transform=banana_transform),
-            TrackingTransform(parent_id="mug", transform=mug_transform),
-            TrackingTransform(parent_id="orange", transform=orange_transform),
+            TrackingTransform(parent_id="drawer"), 
+            TrackingTransform(parent_id="banana"),
+            TrackingTransform(parent_id="mug"),
+            TrackingTransform(parent_id="orange"),
         ],
         base_support = my_scene._scene.metadata["support_polygons"]["plane_support"],
         direction = "middle"
