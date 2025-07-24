@@ -684,3 +684,66 @@ def resolve_multi_polygon(polygon: MultiPolygon) -> list[Polygon]:
                 [resolve_multi_polygon(p) if isinstance(p, MultiPolygon) else p for p in polygon.geoms]
             )
         )
+
+
+def get_mesh_bbox_corners(mesh_vertices: NDArray) -> NDArray:
+    """Get the corners of the bounding box of a mesh.
+
+    Args:
+        mesh_vertices (NDArray): shape (N, 3), the mesh vertices.
+
+    Returns:
+        NDArray: shape (8, 3), the corners of the bounding box.
+    """
+    min_x = np.min(mesh_vertices[:, 0])
+    max_x = np.max(mesh_vertices[:, 0])
+    min_y = np.min(mesh_vertices[:, 1])
+    max_y = np.max(mesh_vertices[:, 1])
+    min_z = np.min(mesh_vertices[:, 2])
+    max_z = np.max(mesh_vertices[:, 2])
+    return np.array([
+        [min_x, min_y, min_z], 
+        [max_x, min_y, min_z], 
+        [min_x, max_y, min_z], 
+        [max_x, max_y, min_z], 
+        [min_x, min_y, max_z], 
+        [max_x, min_y, max_z], 
+        [min_x, max_y, max_z], 
+        [max_x, max_y, max_z]]
+    )
+
+
+def get_min_xy_edge(bbox_corners: NDArray) -> float:
+    """Get the minimum edge length of the bounding box.
+
+    Args:
+        bbox_corners (NDArray): shape (8, 3), the corners of the bounding box.
+
+    Returns:
+        float: the minimum edge length of the bounding box.
+    """
+    return min([
+        abs(bbox_corners[1, 0] - bbox_corners[0, 0]),
+        abs(bbox_corners[2, 1] - bbox_corners[0, 1]),
+    ])
+
+
+def get_edge_point_from_bbox_corners(bbox_corners: NDArray, axis: int, loc: str) -> float:
+    """Get the point on the edge of the bounding box.
+
+    Args:
+        bbox_corners (NDArray): shape (8, 3), the corners of the bounding box.
+        axis (int): the axis to get the point on. 0: x, 1: y, 2: z.
+        loc (str): the location of the point on the edge.
+
+    Returns:
+        float: the point on the edge of the bounding box.
+    """
+    if loc == "min":
+        return np.min(bbox_corners[:, axis])
+    elif loc == "center":
+        return np.mean(bbox_corners[:, axis])
+    elif loc == "max":
+        return np.max(bbox_corners[:, axis])
+    else:
+        raise ValueError(f"Invalid location: {loc}")
