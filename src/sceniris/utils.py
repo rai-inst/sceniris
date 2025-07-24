@@ -654,6 +654,22 @@ ROT_2D_315 = np.array(
     [np.sin(7*np.pi/4), np.cos(7*np.pi/4)]]
 )
 
+def angle_to_2d_rotation_matrix(angle: float) -> NDArray:
+    """Convert an angle to a 2D rotation matrix.
+
+    Args:
+        angle (float): the angle to convert, in degrees
+
+    Returns:
+        NDArray: shape (2, 2), the rotation matrix.
+    """
+    angle = np.deg2rad(angle)
+    return np.array(
+        [[np.cos(angle), -np.sin(angle)],
+        [np.sin(angle), np.cos(angle)]]
+    )
+
+
 def resolve_multi_polygon(polygon: MultiPolygon) -> list[Polygon]:
     """Reduce a multi-polygon to a list of polygons.
 

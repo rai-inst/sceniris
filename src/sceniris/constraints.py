@@ -9,10 +9,7 @@ from copy import deepcopy
 from sceniris.utils import (
     create_ring_polygon, 
     create_polygon_from_unordered_points,
-    ROT_2D_90,
-    ROT_2D_270,
-    ROT_2D_45,
-    ROT_2D_315,
+    angle_to_2d_rotation_matrix,
     scene_graph_transform_get,
     resolve_multi_polygon
 )
@@ -200,18 +197,14 @@ class SurfaceRelation:
         if not self._from_raw:
             raise ValueError("Only from raw surface relation can do the computation")
 
-        # print ("in constraint, distance, distance_type, direction", self.distance, self.distance_type, self.direction)
-
         anchors_world = []
         for anchor in self.anchor_transforms:
             # directly get the transform from the scene graph
             t = scene_graph_transform_get(
                 self.scene.graph, anchor.parent_id, edge_batch=self.scene.edge_batch, cache=self.scene.cache)[0]
-            # print ("anchor t", anchor.parent_id, t)
             if len(t.shape) == 2:
                 t = np.tile(t, (self.num_envs, 1, 1))
             t = np.tile(t, (len(self.base_support), 1, 1, 1))
-            # print ("tshape", t.shape)
             anchors_world.append(t)
         anchors_world = np.stack(anchors_world, axis=0) # (len(anchor_transforms), len(base_support), num_envs, 4, 4)
         anchors_T = np.linalg.inv(self.world_to_surface_transforms) @ anchors_world # mesh
@@ -236,7 +229,6 @@ class SurfaceRelation:
                     mesh_vertices.append(v[..., :3, 0])
                 mesh_vertices = np.concatenate(mesh_vertices, axis=2) # (len(base_support), num_envs, N*n_meshes, 3)
                 anchors_mesh_vertices_surface.append(mesh_vertices) # list of mesh vertices
-            # print (f"get mesh vertices taken: {time.time() - stt:.4f}s")
 
         scene_support_surfaces = []
         if self.direction is None:
@@ -335,9 +327,8 @@ class SurfaceRelation:
                     direction = np.tile(direction, (self.num_envs, 1, 1))
                 direction = direction[..., :2, :]
                 
-                # TODO: modify here to follow direction_tolerance_angle
-                start_dir = (ROT_2D_45 @ direction)[..., 0] # (surface, num_envs, 2)
-                end_dir = (ROT_2D_315 @ direction)[..., 0] # (surface, num_envs, 2)
+                start_dir = (angle_to_2d_rotation_matrix(abs(self.direction_tolerance_angle)) @ direction)[..., 0] # (surface, num_envs, 2)
+                end_dir = (angle_to_2d_rotation_matrix(-abs(self.direction_tolerance_angle)) @ direction)[..., 0] # (surface, num_envs, 2)
                 if self.distance is None:
                     # if no distance is provided
                     inner_r = 0.01
@@ -402,31 +393,23 @@ class SurfaceRelation:
                                 (minx, maxy),
                                 (minx, miny)
                             ])
-                            stttt = time.time()
                             if self.distance_start_bbox:
                                 for anchor_idx in range(len(self.anchor_transforms)):
-                                    # sttttt = time.time()
                                     mesh_vertices = anchors_mesh_vertices_surface[anchor_idx][surface_idx, env_idx] # (N*n_meshes, 3)
                                     convex_hull: Polygon = self._mesh_projection_convex_hull(mesh_vertices, max_z = self.max_z) # Polygon
-                                    # print (len(convex_hull.exterior.xy[0]))
-                                    # print (f"compute scene supports middle difference convex hull {time.time() - sttttt:.4f}s")
                                     polygon = shapely.difference(polygon, convex_hull)
-                                    # print (f"compute scene supports middle difference difference {time.time() - sttttt:.4f}s")
                                     
-                            # print (f"compute scene supports middle difference {time.time() - stttt:.4f}s")
                             self.add_new_polygon_to_scene_support(
                                 scene_support_surfaces[env_idx],
                                 polygon,
                                 self.base_support[surface_idx],
                             )
-                    # print (f"compute scene supports middle {time.time() - sttt:.4f}s")
                 elif len(self.anchor_transforms) > 2:
                     for env_idx in range(self.num_envs):
                         scene_support_surfaces.append([])
                         for surface_idx in range(len(self.base_support)):
                             env_suf_anchor_pos = anchors_T[:, surface_idx, env_idx, :2, 3]
                             polygon = create_polygon_from_unordered_points(env_suf_anchor_pos)
-                            # print ("polygon area multiple anchors", polygon.area)
                             if self.distance_start_bbox:
                                 for anchor_idx in range(len(self.anchor_transforms)):
                                     mesh_vertices = anchors_mesh_vertices_surface[anchor_idx][surface_idx, env_idx] # (N*n_meshes, 3)
@@ -438,7 +421,6 @@ class SurfaceRelation:
                                 self.base_support[surface_idx],
                             )
         self._scene_supports = scene_support_surfaces
-        # print (f"compute scene supports {time.time() - st:.4f}s")
         return scene_support_surfaces
     
     def _group_supports_by_source(
