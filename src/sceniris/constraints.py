@@ -512,8 +512,6 @@ class SurfaceRelation:
 
                 # TODO: finish next_to case after making the object to be 
                 # TODO: process with connect point
-                
-                
         self._scene_supports = scene_support_surfaces
         return scene_support_surfaces
     

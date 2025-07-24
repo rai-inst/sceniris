@@ -985,6 +985,7 @@ class Scene(_Scene):
         # return obj_position_iterator, obj_orientation_iterator, joint_states, constraint, support_id
         placement_args = {}
 
+        obj_id = obj_cfg["id"]
         parent_id = obj_cfg.get("parent_id", None)
         if parent_id is None:
             parent_id = "_plane"
@@ -1019,10 +1020,10 @@ class Scene(_Scene):
                     base_support_id = support_id
                 constraint = SurfaceRelation(
                     scene=self,
+                    asset_to_add = self.assets[obj_id],
                     anchor_transforms = [
                         TrackingTransform(
                             parent_id=aoi,
-                            transform=np.eye(4), # transform will not be used
                         ) for aoi in anchor_object_ids
                     ],
                     base_support = self._scene.metadata["support_polygons"][base_support_id],
