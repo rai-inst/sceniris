@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial.transform import Rotation as R
 
 from scene_synthesizer.utils import sample_volume_mesh, sample_polygon
 
@@ -44,9 +45,13 @@ class PoseGenerator:
 
 
 class OrientationGeneratorConst(PoseGenerator):
-    def __init__(self, orientation: NDArray, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
+    def __init__(self, orientation: NDArray | float, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
         super().__init__(seed, replenish_size)
-        self.orientation = orientation
+        if isinstance(orientation, float):
+            self.orientation = np.eye(4)
+            self.orientation[:3, :3] = R.from_euler('z', orientation).as_matrix()
+        else:
+            self.orientation = orientation
         self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
 
     def replenish(self) -> None:

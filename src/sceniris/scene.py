@@ -34,9 +34,11 @@ except BaseException as E:
     _pyglet_app_run = utils.late_bind_exception(E)
 
 from sceniris.pose_generators import (
+    OrientationGeneratorConst,
+    OrientationGeneratorStablePoses,
+    OrientationGeneratorUniformAroundZ,
     PositionIteratorNone,
     PositionIteratorUniform, 
-    OrientationGeneratorUniformAroundZ,
     PositionIterator2DCollection,
 )
 from sceniris.utils import (
@@ -947,6 +949,15 @@ class Scene(_Scene):
                 "max": float, # the maximum value of the joint, relative, range (0-1)
                 "min": float, # the minimum value of the joint, relative, range (0-1)
                 "distribution": Literal["uniform"] # the distribution of the joint state
+            "rotation": dict[str, Any] | None, # the rotation of the object, only used for the object that is not a part of the parent object
+                if None, uniformly sample a rotation around z.
+                "type": Literal["uniform_z", "stable", "constant"], # the type of the rotation. `stable` is randomly sample a stable
+                    pose of the object. `uniform_z` is uniformly sample a rotation around z. 
+                    `constant` is a constant rotation
+                "orientation": float | NDArray, # the orientation of the object, only used for type `constant`.
+                    float value means constant rotation around z, in rad, otherwise, it should be a 4x4 transform matrix.
+                "lower": float, # the lower bound of the rotation, only used for "uniform_z"
+                "upper": float, # the upper bound of the rotation, only used for "uniform_z"
             "parent_id": str, # must be the object that supports or contains the object to be added. 
                 If None, the object will be placed on the plane.
             "relation_to_parent": Literal["top"], If None, the object will be placed on the top of the plane.
@@ -1004,7 +1015,28 @@ class Scene(_Scene):
 
         # position and orientation
         placement_args["obj_position_iterator"] = None
-        placement_args["obj_orientation_iterator"] = None
+
+        if obj_cfg.get("rotation", None) is not None:
+            rotation_cfg = obj_cfg["rotation"]
+            if rotation_cfg["type"] == "uniform_z":
+                placement_args["obj_orientation_iterator"] = OrientationGeneratorUniformAroundZ(
+                    lower=rotation_cfg["lower"],
+                    upper=rotation_cfg["upper"],
+                    replenish_size=self.num_envs*2,
+                )
+            elif rotation_cfg["type"] == "stable":
+                placement_args["obj_orientation_iterator"] = OrientationGeneratorStablePoses(
+                    asset=self.assets[obj_id],
+                    z_rotation=rotation_cfg.get("z_rotation", True),
+                    replenish_size=self.num_envs*2,
+                )
+            elif rotation_cfg["type"] == "constant":
+                placement_args["obj_orientation_iterator"] = OrientationGeneratorConst(
+                    orientation=rotation_cfg.get("orientation", 0.0),
+                    replenish_size=self.num_envs*2,
+                )
+            else:
+                placement_args["obj_orientation_iterator"] = None
         
         # joint states
         placement_args["joint_states"] = obj_cfg.get("joint_states", None)
