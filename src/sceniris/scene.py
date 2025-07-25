@@ -535,6 +535,7 @@ class Scene(_Scene):
         valid_placement_fn=lambda obj_asset, support, placement_T: True,
         constraint = None,
         joint_states = None,
+        obj_position_iterator_limit = None,
         **kwargs,
     ):
         """Add object by placing it in a non-colliding pose on top of a support surface or inside a container.
@@ -574,26 +575,26 @@ class Scene(_Scene):
                     for env_idx in range(self.num_envs):
                         if len(scene_support[env_idx]) == 0:
                             env_obj_position_iterator.append(
-                                PositionIteratorNone(seed=self._rng, replenish_size=8)
+                                PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)
                             )
                         elif len(scene_support[env_idx]) == 1:
                             env_obj_position_iterator.append(
-                                PositionIteratorUniform(seed=self._rng, replenish_size=8)(scene_support[env_idx][0])
+                                PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)(scene_support[env_idx][0])
                             )
                         else:
                             env_obj_position_iterator.append(
                                 PositionIterator2DCollection(
                                     position_iterators=[
-                                        PositionIteratorUniform(seed=self._rng, replenish_size=8)(s) \
+                                        PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)(s) \
                                             for s in scene_support[env_idx]
                                     ],
-                                    replenish_size=8,
+                                    replenish_size=4,
                                 )
                             )
                     obj_position_iterators = [env_obj_position_iterator[0]]
                 else:
                     obj_position_iterators = [
-                        PositionIteratorUniform(seed=self._rng, replenish_size=self.num_envs*2)(s) \
+                        PositionIteratorUniform(seed=self._rng, replenish_size=self.num_envs*2, xy_limit=obj_position_iterator_limit)(s) \
                             for s in self._scene.metadata["support_polygons"][support_id]
                     ]
                 
@@ -949,6 +950,11 @@ class Scene(_Scene):
                 "max": float, # the maximum value of the joint, relative, range (0-1)
                 "min": float, # the minimum value of the joint, relative, range (0-1)
                 "distribution": Literal["uniform"] # the distribution of the joint state
+            "position": dict[str, Any] | None, # the position of the object, only used for the object that is not a part
+                of the parent object
+                "xy_limit": list[list[float]] # the limit of the position on xy plane, relatively to the parent support surface.
+                    the value is [[minx, miny], [maxx, maxy]] and each element is in [0, 1], meaning from the min to max
+                    of that axis.
             "rotation": dict[str, Any] | None, # the rotation of the object, only used for the object that is not a part of the parent object
                 if None, uniformly sample a rotation around z.
                 "type": Literal["uniform_z", "stable", "constant"], # the type of the rotation. `stable` is randomly sample a stable
@@ -993,7 +999,7 @@ class Scene(_Scene):
         Returns:
             dict[str, Any]: _description_
         """
-        # return obj_position_iterator, obj_orientation_iterator, joint_states, constraint, support_id
+        # return obj_position_iterator, obj_orientation_iterator, joint_states, constraint, support_id, obj_position_iterator_limit
         placement_args = {}
 
         obj_id = obj_cfg["id"]
@@ -1014,6 +1020,11 @@ class Scene(_Scene):
         placement_args["support_id"] = support_id
 
         # position and orientation
+        if obj_cfg.get("position", None) is not None:
+            position_cfg = obj_cfg["position"]
+            placement_args["obj_position_iterator_xy_limit"] = position_cfg["xy_limit"]
+        else:
+            placement_args["obj_position_iterator_xy_limit"] = None
         placement_args["obj_position_iterator"] = None
 
         if obj_cfg.get("rotation", None) is not None:
@@ -1023,6 +1034,7 @@ class Scene(_Scene):
                     lower=rotation_cfg["lower"],
                     upper=rotation_cfg["upper"],
                     replenish_size=self.num_envs*2,
+                    degrees=True
                 )
             elif rotation_cfg["type"] == "stable":
                 placement_args["obj_orientation_iterator"] = OrientationGeneratorStablePoses(
@@ -1034,6 +1046,7 @@ class Scene(_Scene):
                 placement_args["obj_orientation_iterator"] = OrientationGeneratorConst(
                     orientation=rotation_cfg.get("orientation", 0.0),
                     replenish_size=self.num_envs*2,
+                    degrees=True
                 )
             else:
                 placement_args["obj_orientation_iterator"] = None

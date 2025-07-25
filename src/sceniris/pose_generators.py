@@ -1,4 +1,5 @@
 import numpy as np
+from shapely import intersection, MultiPolygon
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
@@ -45,11 +46,11 @@ class PoseGenerator:
 
 
 class OrientationGeneratorConst(PoseGenerator):
-    def __init__(self, orientation: NDArray | float, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
+    def __init__(self, orientation: NDArray | float, seed=None, replenish_size=DEFAULT_REPLISH_SIZE, degrees=False):
         super().__init__(seed, replenish_size)
         if isinstance(orientation, float):
             self.orientation = np.eye(4)
-            self.orientation[:3, :3] = R.from_euler('z', orientation).as_matrix()
+            self.orientation[:3, :3] = R.from_euler('z', orientation, degrees=degrees).as_matrix()
         else:
             self.orientation = orientation
         self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
@@ -61,10 +62,13 @@ class OrientationGeneratorConst(PoseGenerator):
         return self.sample(1)[0]
 
 class OrientationGeneratorUniformAroundZ(PoseGenerator):
-    def __init__(self, lower=0.0, upper=2.0 * np.pi, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
+    def __init__(self, lower=0.0, upper=2.0 * np.pi, seed=None, replenish_size=DEFAULT_REPLISH_SIZE, degrees=False):
         super().__init__(seed, replenish_size)
         self.lower = lower
         self.upper = upper
+        if degrees:
+            self.lower = np.deg2rad(self.lower)
+            self.upper = np.deg2rad(self.upper)
         self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
 
     def replenish(self) -> None:
@@ -134,17 +138,38 @@ class PositionIteratorUniform3D(PositionIterator3D):
 
 
 class PositionIterator2D(PoseGenerator):
-    def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
+    def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE, xy_limit=None):
         super().__init__(seed, replenish_size)
         self.polygon: Polygon = None
         self.support: SupportSurface = None
         self.sample_buffer: NDArray | list = np.empty((0, 2), dtype=np.float32)
+        self.xy_limit = xy_limit
 
     def __iter__(self):
         return self
 
     def __call__(self, support):
         self.polygon = support.polygon
+        if self.xy_limit is not None:
+            vertices = self.polygon.exterior.xy
+            minvx, minvy, maxvx, maxvy = np.min(vertices[0]), np.min(vertices[1]), np.max(vertices[0]), np.max(vertices[1])
+            low_x = self.xy_limit[0][0] * (maxvx - minvx) + minvx
+            low_y = self.xy_limit[0][1] * (maxvy - minvy) + minvy
+            high_x = self.xy_limit[1][0] * (maxvx - minvx) + minvx
+            high_y = self.xy_limit[1][1] * (maxvy - minvy) + minvy
+            xy_polygon = Polygon([
+                (low_x, low_y),
+                (high_x, low_y),
+                (high_x, high_y),
+                (low_x, high_y),
+                (low_x, low_y),
+            ])
+            cropped_polygon = self.polygon.intersection(xy_polygon)
+            # TODO: deal with MultiPolygon, headache
+            if isinstance(cropped_polygon, MultiPolygon):
+                cropped_polygon = cropped_polygon.geoms[0]
+            self.polygon = cropped_polygon
+
         self.support = support
         self.sample_buffer = np.empty((0, 2), dtype=np.float32) # reset buffer if changed support
         return self
