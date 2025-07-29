@@ -52,6 +52,7 @@ from sceniris.utils import (
     batch_transform_matrix_to_vectors,
     invalidate_scenegraph_cache,
     homogeneous_inv_batch,
+    visualize_mesh,
 )
 
 from sceniris.constraints import SurfaceRelation, TrackingTransform
@@ -173,6 +174,7 @@ class Scene(_Scene):
         if len(query_obj_T.shape) == 2:
             query_obj_T = np.tile(query_obj_T, (len(env_ids), 1, 1))
         query_obj_pose = torch.from_numpy(query_obj_T).to(torch.float32)
+        # print ("query_obj_pose", query_obj_id, query_obj_pose[:, :3, 3])
 
         query_obj_scene = query_obj_asset.as_trimesh_scene(use_collision_geometry=True)
         query_obj_edge_batch = {}
@@ -191,24 +193,46 @@ class Scene(_Scene):
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
             fn = node_name.replace("object/", f"{query_obj_id}___") # triple _ to seperate obj_id and node_name
-            path = os.path.join(default_mesh_folder, f"{fn}.stl")
+            mesh_file_path = os.path.join(default_mesh_folder, f"{fn}.stl")
             query_mesh = Mesh(
                 name=node_name,
                 pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                file_path=path,
+                file_path=mesh_file_path,
             )
+            # print ("query_mesh_bounds", node_name, mesh.bounds)
+            mesh_height = mesh.bounds[1, 2] - mesh.bounds[0, 2]
+            # mesh is in original frame
+            # the origin is reflected in transform in the scene graph (local_T below)
             local_T = scene_graph_transform_get(
                 query_obj_scene.graph, node_name, edge_batch=query_obj_edge_batch, cache={}
             )[0].copy() # (N, 4, 4) or (4, 4)
+            # print ("local_T", local_T[..., :3, 3])
             local_T.flags["WRITEABLE"] = True
             local_T = torch.from_numpy(local_T).to(torch.float32)
             local_T = query_obj_pose @ local_T # (N, 4, 4) because query_obj_pose is (N, 4, 4)
+            # print ("local_T after query_obj_pose", local_T[..., :3, 3])
             n_sph = N_SPH_BASE
             query_sph_approx = query_mesh.get_bounding_spheres(n_spheres=n_sph)
-            sph_pos = torch.stack([torch.tensor(s.position, dtype=torch.float32) for s in query_sph_approx], dim=0)
-            sph_pos = sph_pos.unsqueeze(0) + local_T[:, :3, 3].unsqueeze(1) # (N, n_sph, 3)
+            n_sph = len(query_sph_approx)
+            sph_pos = torch.stack([torch.tensor(s.position, dtype=torch.float32) for s in query_sph_approx], dim=0) # (n_sph, 3)
+            # print ("sph_pos z bound", sph_pos[:, 2].min(), sph_pos[:, 2].max())
+
+            # -------------
+            # TODO: <jshang> important note:
+            # for some reason the spheres are using the center of the mesh as the origin, not the same as specified
+            # in mesh (center, center, bottom). So an additional offset on z is needed to raise the spheres up
+            # otherwise it always collides with the support surface
+            # local_T is supposed to do this but it doesn't work for some reason
+            sph_pos[..., 2] += mesh_height / 2
+            # -------------
+            sph_pos_homo = torch.cat([sph_pos, torch.ones((n_sph, 1), dtype=torch.float32)], dim=1) # (n_sph, 4)
+            sph_pos_homo = sph_pos_homo.unsqueeze(0).unsqueeze(-1) # (1, n_sph, 4, 1)
+            sph_pos_homo = local_T.unsqueeze(1) @ sph_pos_homo # (N, n_sph, 4, 1)
+            sph_pos = sph_pos_homo[..., :3, 0] # (N, n_sph, 3)
+            # print ("sph_pos after local_T z bound", sph_pos[..., 2].min(), sph_pos[..., 2].max())
+            # sph_pos = sph_pos.unsqueeze(0) + local_T[:, :3, 3].unsqueeze(1)      # (N, n_sph, 3)
             sph_radius = torch.stack([torch.tensor([s.radius], dtype=torch.float32) for s in query_sph_approx], dim=0)\
-                        .unsqueeze(0).repeat(len(env_ids), 1, 1) # (N, n_sph, 1)
+                        .unsqueeze(0).repeat(len(env_ids), 1, 1)                 # (N, n_sph, 1)
             sph = tensor_args.to_device(torch.cat([sph_pos, sph_radius], dim=2)) # (N, n_sph, 4)
             sph = sph.unsqueeze(1) # (N, horizon(1), n_sph, 4)
             mesh_spheres.append(sph)
@@ -218,17 +242,20 @@ class Scene(_Scene):
 
         # query curobo
         collision_query_buffer = CollisionQueryBuffer.initialize_from_shape(
-            sph.shape, tensor_args, world_ccheck.collision_types
+            mesh_spheres.shape, tensor_args, world_ccheck.collision_types
         )
         act_distance = tensor_args.to_device([0.0])
         weight = tensor_args.to_device([1])
         if hasattr(self, "_curobo_world_ccheck") and self._curobo_world_ccheck is not None:
             env_query_idx = env_ids.to(device=tensor_args.device, dtype=torch.int32)
         else:
-            env_query_idx = torch.arange(sph.shape[0], device=tensor_args.device, dtype=torch.int32)
+            env_query_idx = torch.arange(mesh_spheres.shape[0], device=tensor_args.device, dtype=torch.int32)
         d = world_ccheck.get_sphere_distance(
-            sph, collision_query_buffer, weight, act_distance, env_query_idx=env_query_idx
+            mesh_spheres, collision_query_buffer, weight, act_distance, env_query_idx=env_query_idx
         )
+        # for i in range(d.size(0)):
+        #     colliding_mesh = mesh_spheres[i, 0, torch.nonzero(d[i, 0] > 0).flatten(), :3].cpu().numpy() #(n_colliding, 3)
+        #     visualize_mesh(colliding_mesh, mesh_spheres[i, 0, :, :3].cpu().numpy())
         # gather results by collapsing horizon (dim1) and n_sph*n_parts (dim2)
         return torch.any(d > 0, dim=(1,2)).cpu() # (N,)
 
@@ -242,7 +269,7 @@ class Scene(_Scene):
         parent_id=None,
         max_iter=10,
         max_iter_per_support=10,
-        distance_above_support=0.002,
+        distance_above_support=0.005,
         joint_type="floating",
         valid_placement_fn=lambda obj_asset, support, placement_T: True,
         debug=False,
@@ -300,7 +327,6 @@ class Scene(_Scene):
             if parent_id is None:
                 parent_id = "world"
 
-            # st = time.time()
             joint_ids = []
             joint_value_ranges = []
             # is joint_states is None, the object will use default joint states
@@ -320,7 +346,6 @@ class Scene(_Scene):
                     jid: np.zeros((self.num_envs,), np.float32)
                     for jid in joint_ids
                 }
-            # print (f"build joint minmax taken: {time.time() - st:.4f}s")
             # joint_value_ranges = np.concatenate(joint_value_ranges, axis=0) # (num_joints, 2)
 
             iter = 0
@@ -391,8 +416,10 @@ class Scene(_Scene):
                 if isinstance(support, np.ndarray):
                     # transform 3D coordinate with respect to the normalized surface to mesh frame
                     support_transforms = get_support_transforms(support)
+                    # print ("support_transforms", support_transforms[..., :3, 3])
                     # print (support_transforms.shape, pos3d.shape, ori.shape)
                     placement_T = support_transforms @ point_to_translation_matrix(pos3d) @ ori
+                    # print ("placement T", placement_T[..., :3, 3])
                     # print ("placement T shape", placement_T.shape)
                     support_node_names = get_support_node_names(support)
                     parent_to_support_node = get_transform_batch(
@@ -401,7 +428,7 @@ class Scene(_Scene):
                         parent_to_support_node = parent_to_support_node[working_env_ids]
                 elif isinstance(support, SupportSurface):
                     placement_T = support.transform @ point_to_translation_matrix(pos3d) @ ori
-                    # print ("support transform", support.transform)
+                    # print ("support transform", support.transform[..., :3, 3])
                     # print ("coord on scene node", placement_T[:, :3, 3])
                     parent_to_support_node = scene_graph_transform_get(
                         self._scene.graph, 
@@ -415,6 +442,7 @@ class Scene(_Scene):
                 else:
                     raise ValueError(f"Invalid supports: {support}")
 
+                # print ("parent_to_support_node", parent_to_support_node[..., :3, 3])
                 placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
                 
                 if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
@@ -426,8 +454,8 @@ class Scene(_Scene):
                     world_to_parent = np.eye(4)
             
                 world_T = world_to_parent @ placement_T # T_w_obj
+                # print (f"world T {world_T[..., :3, 3]}")
 
-                # st = time.time()
                 joint_values = []
                 if joint_states is not None and len(joint_states) > 0:
                     for joint_group_idx, js in enumerate(joint_states):
@@ -440,10 +468,8 @@ class Scene(_Scene):
                         else:
                             raise ValueError(f"Invalid distribution for joint states: {distribution}")
                 
-
                 if len(joint_values) > 0:
                     joint_values = np.concatenate(joint_values, axis=1) # (num_envs, num_joints)
-
                     self.update_configuration(
                         configuration=joint_values,
                         joint_ids=joint_ids,
@@ -457,11 +483,8 @@ class Scene(_Scene):
                 # disable for now
 
                 # Check collisions
-                # st = time.time()
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
-                # print (f"placing {obj_id} has collision", has_collision)
-                # print (f"collision check taken: {time.time() - st:.4f}s")
-                # is_valid = is_valid & ~has_collision
+                print (f"placing {obj_id} has collision", has_collision)
 
                 retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
@@ -488,7 +511,6 @@ class Scene(_Scene):
             if len(env_ids) > 0:
                 log.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
                 return env_ids.numpy() # return invalid env_ids
-            
 
             log.debug(f"Adding {obj_id} to {parent_id}")
             
@@ -530,12 +552,12 @@ class Scene(_Scene):
         obj_position_iterator=None,
         obj_orientation_iterator=None,
         max_iter=10,
-        distance_above_support=0.001,
+        distance_above_support=0.005,
         joint_type="floating",
         valid_placement_fn=lambda obj_asset, support, placement_T: True,
         constraint = None,
         joint_states = None,
-        obj_position_iterator_limit = None,
+        obj_position_iterator_xy_limit = None,
         **kwargs,
     ):
         """Add object by placing it in a non-colliding pose on top of a support surface or inside a container.
@@ -575,17 +597,17 @@ class Scene(_Scene):
                     for env_idx in range(self.num_envs):
                         if len(scene_support[env_idx]) == 0:
                             env_obj_position_iterator.append(
-                                PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)
+                                PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)
                             )
                         elif len(scene_support[env_idx]) == 1:
                             env_obj_position_iterator.append(
-                                PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)(scene_support[env_idx][0])
+                                PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)(scene_support[env_idx][0])
                             )
                         else:
                             env_obj_position_iterator.append(
                                 PositionIterator2DCollection(
                                     position_iterators=[
-                                        PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_limit)(s) \
+                                        PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)(s) \
                                             for s in scene_support[env_idx]
                                     ],
                                     replenish_size=4,
@@ -594,7 +616,7 @@ class Scene(_Scene):
                     obj_position_iterators = [env_obj_position_iterator[0]]
                 else:
                     obj_position_iterators = [
-                        PositionIteratorUniform(seed=self._rng, replenish_size=self.num_envs*2, xy_limit=obj_position_iterator_limit)(s) \
+                        PositionIteratorUniform(seed=self._rng, replenish_size=self.num_envs*2, xy_limit=obj_position_iterator_xy_limit)(s) \
                             for s in self._scene.metadata["support_polygons"][support_id]
                     ]
                 
@@ -794,12 +816,12 @@ class Scene(_Scene):
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
             for mesh_path in asset_mesh_paths:
                 mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/").replace("object/", f"{obj_id}/")
-                mesh = Mesh(
-                    name=mesh_node_name,
-                    file_path=mesh_path,
-                    pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
-                )
                 for env_id in range(self.num_envs):
+                    mesh = Mesh(
+                        name=mesh_node_name,
+                        file_path=mesh_path,
+                        pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
+                    )
                     env_meshes[env_id].append(mesh)
                 self._all_mesh_names[obj_id].append(mesh_node_name)
             self._object_enabled[obj_id] = False # disable all objects
@@ -824,7 +846,7 @@ class Scene(_Scene):
         Args:
             update_enabled (bool): Whether to update the enabled state of the objects.
             update_transforms (bool): Whether to update the transforms of the objects.
-            update_obj_ids (list[str]): The object ids to update.
+            update_obj_ids (list[str]): The object ids to update. Defaults to [], will use all enabled objects.
             env_ids (NDArray, optional): The env ids to update. Defaults to None, updating all envs.
         """
         if not hasattr(self, "_curobo_world_ccheck") or self._curobo_world_ccheck is None:
@@ -847,6 +869,7 @@ class Scene(_Scene):
                         continue
                     mesh_transform = scene_graph_transform_get(
                         self._scene.graph, mesh_node_name, edge_batch=self.edge_batch, cache=self.cache)[0]
+                    # print ("updating curobo world ccheck", mesh_node_name, mesh_transform[..., :3, 3])
                     # to directly modify _mesh_tensor_list[1] (mesh's world ccheck transform), use inverse transform
                     # quat is wxyz
                     pos, quat = batch_transform_matrix_to_vectors(homogeneous_inv_batch(mesh_transform), wxyz=True) 

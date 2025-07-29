@@ -1,5 +1,5 @@
 import numpy as np
-from shapely import intersection, MultiPolygon
+from shapely import intersection, MultiPolygon, Polygon
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
@@ -10,7 +10,6 @@ from sceniris.utils import sample_random_z_rotations, check_within_polygon
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from scene_synthesizer.scene import SupportSurface
-    from shapely.geometry import Polygon
 
 DEFAULT_REPLISH_SIZE = 2
 
@@ -162,7 +161,6 @@ class PositionIterator2D(PoseGenerator):
                 (high_x, low_y),
                 (high_x, high_y),
                 (low_x, high_y),
-                (low_x, low_y),
             ])
             cropped_polygon = self.polygon.intersection(xy_polygon)
             # TODO: deal with MultiPolygon, headache

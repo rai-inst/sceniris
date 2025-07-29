@@ -261,10 +261,10 @@ class SurfaceRelation:
                     # (len(base_support), num_envs, 1, 4, 4)) @ (N, 4, 1) -> (len(base_support), num_envs, N, 4, 1))
                     v = mesh_T[:, :, np.newaxis, ...] @ (np.concatenate([v, np.ones((v.shape[0], 1), dtype=v.dtype)], axis=1)[:, :, np.newaxis])
                     mesh_vertices.append(v[..., :3, 0])
-                    raw_v = ori_T @ (np.concatenate([v, np.ones((v.shape[0], 1), dtype=v.dtype)], axis=1)[:, :, np.newaxis])
+                    raw_v = ori_T @ (np.concatenate([mesh.vertices, np.ones((mesh.vertices.shape[0], 1), dtype=mesh.vertices.dtype)], axis=1)[:, :, np.newaxis])
                     raw_mesh_vertices.append(raw_v[..., :3, 0])
                 mesh_vertices = np.concatenate(mesh_vertices, axis=2) # (len(base_support), num_envs, N*n_meshes, 3)
-                raw_mesh_vertices = np.concatenate(raw_mesh_vertices, axis=2) # (N*n_meshes, 3)
+                raw_mesh_vertices = np.concatenate(raw_mesh_vertices, axis=0) # (N*n_meshes, 3)
                 anchors_mesh_vertices_surface.append(mesh_vertices) # list of mesh vertices
                 anchors_raw_mesh_vertices.append(raw_mesh_vertices) # list of raw mesh vertices
             
@@ -276,7 +276,7 @@ class SurfaceRelation:
                 # (4, 4) @ (N, 4, 1) -> (N, 4, 1)
                 v = mesh_T @ (np.concatenate([v, np.ones((v.shape[0], 1), dtype=v.dtype)], axis=1)[:, :, np.newaxis])
                 mesh_vertices.append(v[..., :3, 0])
-            mesh_vertices = np.concatenate(mesh_vertices, axis=2) # (len(base_support), num_envs, N*n_meshes, 3)
+            mesh_vertices = np.concatenate(mesh_vertices, axis=0) # (N*n_meshes, 3)
             asset_to_add_mesh_vertices = mesh_vertices # list of mesh vertices
             asset_to_add_bbox_corners = get_mesh_bbox_corners(asset_to_add_mesh_vertices)
 

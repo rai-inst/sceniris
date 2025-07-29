@@ -747,3 +747,18 @@ def get_edge_point_from_bbox_corners(bbox_corners: NDArray, axis: int, loc: str)
         return np.max(bbox_corners[:, axis])
     else:
         raise ValueError(f"Invalid location: {loc}")
+
+
+def visualize_mesh(mesh: NDArray, mesh2: NDArray = None):
+    """Visualize a mesh.
+
+    Args:
+        mesh (NDArray): shape (N, 3), the mesh vertices.
+    """
+    import trimesh
+    if mesh2 is not None:
+        mesh[..., 2] += 0.01
+        # offset mesh on z so points are not overlapping with mesh2
+    pc1 = trimesh.PointCloud(mesh, colors=np.array([[255, 0, 0, 255]]*len(mesh), dtype=np.uint8))
+    pc2 = trimesh.PointCloud(mesh2, colors=np.array([[0, 0, 255, 255]]*len(mesh2), dtype=np.uint8))
+    trimesh.Scene([pc1, pc2]).show()
