@@ -484,7 +484,7 @@ class Scene(_Scene):
 
                 # Check collisions
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
-                print (f"placing {obj_id} has collision", has_collision)
+                print (f"placing {obj_id} has collision", has_collision.sum().item())
 
                 retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
@@ -816,12 +816,12 @@ class Scene(_Scene):
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
             for mesh_path in asset_mesh_paths:
                 mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/").replace("object/", f"{obj_id}/")
+                mesh = Mesh(
+                    name=mesh_node_name,
+                    file_path=mesh_path,
+                    pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
+                )
                 for env_id in range(self.num_envs):
-                    mesh = Mesh(
-                        name=mesh_node_name,
-                        file_path=mesh_path,
-                        pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
-                    )
                     env_meshes[env_id].append(mesh)
                 self._all_mesh_names[obj_id].append(mesh_node_name)
             self._object_enabled[obj_id] = False # disable all objects
@@ -1054,8 +1054,8 @@ class Scene(_Scene):
             rotation_cfg = obj_cfg["rotation"]
             if rotation_cfg["type"] == "uniform_z":
                 placement_args["obj_orientation_iterator"] = OrientationGeneratorUniformAroundZ(
-                    lower=rotation_cfg["lower"],
-                    upper=rotation_cfg["upper"],
+                    lower=rotation_cfg.get("lower", -180.0),
+                    upper=rotation_cfg.get("upper", 180.0),
                     replenish_size=self.num_envs*2,
                     degrees=True
                 )
