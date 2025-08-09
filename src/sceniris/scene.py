@@ -24,7 +24,7 @@ setup_curobo_logger("error")
 from curobo.geom.sdf.world_mesh import WorldMeshCollision
 
 from scene_synthesizer import Scene as _Scene
-from scene_synthesizer.scene import SupportSurface
+from scene_synthesizer.scene import SupportSurface, Container
 from scene_synthesizer.assets import PlaneAsset
 from scene_synthesizer.utils import log
 from scene_synthesizer import utils
@@ -95,6 +95,8 @@ class Scene(_Scene):
         self._object_enabled = {}
         self._all_mesh_names = defaultdict(list) # dict: obj_id -> mesh_names <list[str]>
         self.valid_env_mask = np.ones((self.num_envs,), dtype=np.bool_)
+        self._no_relationship_scene = trimesh.Scene()
+        self._plane_asset = None
 
     def collision_check(
         self, 
@@ -353,47 +355,52 @@ class Scene(_Scene):
             edge_key = (parent_id, obj_id)
             while iter < max_iter:
                 n_working_envs = len(env_ids)
-                if env_position_iterator is not None and isinstance(env_position_iterator, list) and len(env_position_iterator) > 0:
-                    st = time.time()
-                    pos_raw = {"samples": [], "support_refs": []}
-                    working_env_ids = []
-                    failed_env_ids = [] # env ids that failed to sample
-                    for env_idx in env_ids:
-                        if isinstance(env_position_iterator[env_idx], PositionIteratorNone):
-                            failed_env_ids.append(env_idx)
-                            continue
-                        env_pos_raw = env_position_iterator[env_idx].sample(1)
-                        if isinstance(env_pos_raw, dict): # PositionIteratorCollection
-                            # skip invalid samples
-                            if np.isnan(env_pos_raw["samples"]).any():
-                                failed_env_ids.append(env_idx)
-                                continue
-                            pos_raw["samples"].append(env_pos_raw["samples"])
-                            pos_raw["support_refs"].append(env_pos_raw["support_refs"])
-                        else: # PositionIterator2D or PositionIteratorNone
-                            # skip invalid samples
-                            if np.isnan(env_pos_raw).any():
-                                failed_env_ids.append(env_idx)
-                                continue
-                            pos_raw["samples"].append(env_pos_raw)
-                            pos_raw["support_refs"].append(np.array([env_position_iterator[env_idx].support])) # could be None
-                        working_env_ids.append(env_idx)
-                        # filter out nan pos from PositionIteratorNone (means no valid positions)
-                    # print ("pos_raw", pos_raw)
-                    working_env_ids = torch.from_numpy(np.array(working_env_ids)).to(torch.int32)
-                    n_working_envs = len(working_env_ids)
-                    try:
-                        pos_raw["samples"] = np.concatenate(pos_raw["samples"], axis=0)
-                        pos_raw["support_refs"] = np.concatenate(pos_raw["support_refs"], axis=0)
-                    except ValueError as e:
-                        return env_ids
-                    # print (f"iterate over constraints taken: {time.time() - st:.4f}s")
-                    log.debug (f"iterate over constraints {(time.time() - st):.6f}s")
+                if "fixed_world_positions" in kwargs:
+                    #TODO: <jshang> handle fixed_world_positions
+                    pos = kwargs["fixed_world_positions"]
                 else:
-                    pos_raw = position_iterator.sample(n_working_envs)
-                    working_env_ids = env_ids[:]
-                    failed_env_ids = []
-                
+                    if env_position_iterator is not None and isinstance(env_position_iterator, list) and len(env_position_iterator) > 0:
+                        # st = time.time()
+                        pos_raw = {"samples": [], "support_refs": []}
+                        working_env_ids = []
+                        failed_env_ids = [] # env ids that failed to sample
+                        for env_idx in env_ids:
+                            if isinstance(env_position_iterator[env_idx], PositionIteratorNone):
+                                failed_env_ids.append(env_idx)
+                                continue
+                            env_pos_raw = env_position_iterator[env_idx].sample(1)
+                            if isinstance(env_pos_raw, dict): # PositionIteratorCollection
+                                # skip invalid samples
+                                if np.isnan(env_pos_raw["samples"]).any():
+                                    failed_env_ids.append(env_idx)
+                                    continue
+                                pos_raw["samples"].append(env_pos_raw["samples"])
+                                pos_raw["support_refs"].append(env_pos_raw["support_refs"])
+                                print (f"env_pos_raw", env_pos_raw)
+                            else: # PositionIterator2D or PositionIteratorNone
+                                # skip invalid samples
+                                if np.isnan(env_pos_raw).any():
+                                    failed_env_ids.append(env_idx)
+                                    continue
+                                pos_raw["samples"].append(env_pos_raw)
+                                pos_raw["support_refs"].append(np.array([env_position_iterator[env_idx].support])) # could be None
+                            working_env_ids.append(env_idx)
+                            # filter out nan pos from PositionIteratorNone (means no valid positions)
+                        # print ("pos_raw", pos_raw)
+                        working_env_ids = torch.from_numpy(np.array(working_env_ids)).to(torch.int32)
+                        n_working_envs = len(working_env_ids)
+                        try:
+                            pos_raw["samples"] = np.concatenate(pos_raw["samples"], axis=0)
+                            pos_raw["support_refs"] = np.concatenate(pos_raw["support_refs"], axis=0)
+                        except ValueError as e:
+                            return env_ids
+                        # print (f"iterate over constraints taken: {time.time() - st:.4f}s")
+                        log.debug (f"iterate over constraints {(time.time() - st):.6f}s")
+                    else:
+                        pos_raw = position_iterator.sample(n_working_envs)
+                        working_env_ids = env_ids[:]
+                        failed_env_ids = []
+                    
                 # orientation (on normalized surface)
                 ori = orientation_iterator.sample(n_working_envs)
                 if len(ori.shape) == 2:
@@ -410,7 +417,7 @@ class Scene(_Scene):
                 pos3d = np.concatenate([pos, np.full((pos.shape[0], 1), distance_above_support)], axis=1) \
                     if pos.shape[-1] == 2 else pos  # normalized surface
 
-                # print (f"{obj_id} sampled pos", pos3d)
+                print (f"{obj_id} sampled pos", pos3d)
 
                 # Transform plane coordinates into scene coordinates
                 if isinstance(support, np.ndarray):
@@ -442,8 +449,9 @@ class Scene(_Scene):
                 else:
                     raise ValueError(f"Invalid supports: {support}")
 
-                # print ("parent_to_support_node", parent_to_support_node[..., :3, 3])
+                print ("parent_to_support_node", parent_to_support_node[..., :3, 3])
                 placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
+                print (f"placement T {placement_T[..., :3, 3]}")
                 
                 if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
                     world_to_parent = scene_graph_transform_get(
@@ -454,7 +462,7 @@ class Scene(_Scene):
                     world_to_parent = np.eye(4)
             
                 world_T = world_to_parent @ placement_T # T_w_obj
-                # print (f"world T {world_T[..., :3, 3]}")
+                print (f"world T {world_T[..., :3, 3]}")
 
                 joint_values = []
                 if joint_states is not None and len(joint_states) > 0:
@@ -517,7 +525,8 @@ class Scene(_Scene):
             # use env0 transform to update trimesh scene
             trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
             if obj_id in self._scene.metadata["object_nodes"]:
-                self._scene.graph.transforms.edge_data[edge_key].update(matrix=trimesh_transform)
+                pass # skip modifing trimesh scene
+                # self._scene.graph.transforms.edge_data[edge_key].update(matrix=trimesh_transform)
             else:
                 self.add_object(
                     obj_id=obj_id,
@@ -558,6 +567,7 @@ class Scene(_Scene):
         constraint = None,
         joint_states = None,
         obj_position_iterator_xy_limit = None,
+        erosion_distance: float = 0.02,
         **kwargs,
     ):
         """Add object by placing it in a non-colliding pose on top of a support surface or inside a container.
@@ -595,19 +605,26 @@ class Scene(_Scene):
                     env_obj_position_iterator = []
                     scene_support = constraint.scene_supports
                     for env_idx in range(self.num_envs):
+                        print (f"len(scene_support[env_idx])", len(scene_support[env_idx]))
                         if len(scene_support[env_idx]) == 0:
                             env_obj_position_iterator.append(
                                 PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)
                             )
                         elif len(scene_support[env_idx]) == 1:
                             env_obj_position_iterator.append(
-                                PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)(scene_support[env_idx][0])
+                                PositionIteratorUniform(
+                                    seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit,
+                                    erosion_distance=erosion_distance
+                                )(scene_support[env_idx][0])
                             )
                         else:
                             env_obj_position_iterator.append(
                                 PositionIterator2DCollection(
                                     position_iterators=[
-                                        PositionIteratorUniform(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)(s) \
+                                        PositionIteratorUniform(
+                                            seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit,
+                                            erosion_distance=erosion_distance
+                                        )(s) \
                                             for s in scene_support[env_idx]
                                     ],
                                     replenish_size=4,
@@ -615,8 +632,13 @@ class Scene(_Scene):
                             )
                     obj_position_iterators = [env_obj_position_iterator[0]]
                 else:
+                    print (f"support polygon counts {support_id}", len(self._scene.metadata["support_polygons"][support_id]))
                     obj_position_iterators = [
-                        PositionIteratorUniform(seed=self._rng, replenish_size=self.num_envs*2, xy_limit=obj_position_iterator_xy_limit)(s) \
+                        PositionIteratorUniform(
+                            seed=self._rng, replenish_size=self.num_envs*2, 
+                            xy_limit=obj_position_iterator_xy_limit,
+                            erosion_distance=erosion_distance
+                            )(s) \
                             for s in self._scene.metadata["support_polygons"][support_id]
                     ]
                 
@@ -720,9 +742,12 @@ class Scene(_Scene):
     def _load_assets(self) -> None:
         """load assets from cfg."""
         cfg = self._cfg
+        self.assets_extents: dict[str, NDArray] = {}
         for obj_id, obj_cfg in cfg["objects"].items():
             asset_path = obj_cfg["asset_path"]
             self.assets[obj_id] = Asset(asset_path, origin=("center", "center", "bottom"))
+            asset_mesh = self.assets[obj_id].as_trimesh_scene(use_collision_geometry=True).dump(concatenate=True)
+            self.assets_extents[obj_id] = asset_mesh.bounding_box_oriented.extents # width, depth, height (x,y,z)
         
 
     def _build_gen_tree(self) -> None:
@@ -777,19 +802,24 @@ class Scene(_Scene):
         else:
             width = depth = self.env_size
             center = (0, 0, 0)
-
+            
+        self._plane_asset = PlaneAsset(width=width, depth=depth, center=center)
         self.add_object(
-            asset=PlaneAsset(width=width, depth=depth, center=center),
+            asset=self._plane_asset,
             obj_id="_plane",
         )
-        for obj_id in self._gen_node_order:
+        for i, obj_id in enumerate(self._gen_node_order):
             if obj_id in self.assets:
+                # give assets enough space so that the lable_support can work properly
+                init_pos = np.array([100*i, 100*i, 100*i])
+                init_transform = np.eye(4)
+                init_transform[:3, 3] = init_pos
                 self.add_object(
                     obj_id=obj_id,
                     asset=self.assets[obj_id],
                     parent_id=self._cfg["objects"][obj_id].get("parent_id", "_plane"),
                     use_collision_geometry=True,
-                    transform=np.eye(4),
+                    transform=init_transform,
                     joint_type="floating"
                 )
 
@@ -901,7 +931,7 @@ class Scene(_Scene):
             # TODO: handle sub traversal maybe
             object_cfg = self._cfg["objects"][obj_id]
             placement_args = self._parse_obj_placement_cfg(object_cfg) 
-            # placement_args: obj_position_iterator, obj_orientation_iterator, constraint, support_id
+            # placement_args: obj_position_iterator, obj_orientation_iterator, constraint, support_id, erosion_distance
 
             invalid_env_ids = self.place_object(
                 obj_id=obj_id,
@@ -989,8 +1019,19 @@ class Scene(_Scene):
                 "upper": float, # the upper bound of the rotation, only used for "uniform_z"
             "parent_id": str, # must be the object that supports or contains the object to be added. 
                 If None, the object will be placed on the plane.
-            "relation_to_parent": Literal["top"], If None, the object will be placed on the top of the plane.
-                For placing inside something, use the id of theparent object part that holds the object as `parent_id`.
+            "relation_to_parent": Literal["top", "inside"] | None, If None, the object will be placed on the top of the plane.
+                `top` means place the object on the top of the object surface that there is no roof.
+                `inside` means place the object inside the object where a part can hold that object.
+                For placing inside something, there are two ways: 
+                    use the id of theparent object part that holds the object as `parent_id`, and set `relation_to_parent` to `on`,
+                    or use the id of the object as `parent_id`, and set `relation_to_parent` to `inside`.
+                    By default, we will use "top".
+            "ratio_on_support": float | None,
+                a value in [0.0, 1.0] indicating how much of the projection of the asset should be included in the support surface, i.e. 
+                Area(polygon(asset_project) & polygon(support_surface)) / Area(polygon(asset_project)).
+                This is implemented in an estimated way where since we don't know the final pose of the object.
+                Defaults to 1.0, meaning that the entire asset (projected on the support surface) should be 
+                included in the support surface. If None, means 0.0.
             "constraints": [{ # other constraints
                 "anchor_object_ids": list[str],
                 "base_support_id": str, # the object that provides the support surface, if not provided, use the support surface of the parent_id
@@ -1033,13 +1074,39 @@ class Scene(_Scene):
         relation_to_parent = obj_cfg.get("relation_to_parent", "top")
         constraints = obj_cfg.get("constraints", [])
 
-        # support surface
+        # support surface: composing support_id and label it if it does not exist
         support_id = parent_id
+        asset_minxy_length = min(self.assets_extents[obj_id][:2])
+        print (obj_id, "asset_minxy_length:", asset_minxy_length)
         if support_id is not None:
-            # convert obj id to support id
-            support_id = f"_support_{support_id}"
+            # assign support id. each object placed on the support will have its unique support id.
+            support_id = f"_support_{support_id}_{relation_to_parent}"
+            # print (f"label support id {support_id}")
+            ratio_on_support = obj_cfg.get("ratio_on_support", 0.0)
+            if ratio_on_support is not None:
+                ratio_on_support = min(1.0, ratio_on_support)
+                ratio_on_support = max(0.0, ratio_on_support)
+                erosion_distance = asset_minxy_length / 2 * ratio_on_support
+            else:
+                erosion_distance = 0.0
+            placement_args["erosion_distance"] = erosion_distance
+            # print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
+            print ("support_id", support_id, "parent_id", parent_id, "relation_to_parent", relation_to_parent)
             if support_id not in self._scene.metadata["support_polygons"]:
-                self.label_support(support_id, geom_ids=parent_id)
+                if relation_to_parent == "top":
+                    self.label_support(
+                        support_id, 
+                        geom_ids=parent_id, 
+                        exclude_support_polyhedra=True, 
+                        min_area=0.04, 
+                    )
+                elif relation_to_parent == "inside":
+                    self.label_support(
+                        support_id, 
+                        geom_ids=parent_id, 
+                        min_area=0.04, 
+                    )
+            print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
         placement_args["support_id"] = support_id
 
         # position and orientation
@@ -1238,7 +1305,309 @@ class Scene(_Scene):
             joint_type, 
             **kwargs
         )
+
+    # modify original label_support to support "top surfaces only" 
+    # the original function only support "excluding top surfaces"
+    def label_support(
+        self,
+        label,
+        gravity=np.array([0, 0, -1.0]),
+        gravity_tolerance=0.1,
+        erosion_distance=0.02,
+        layer="collision",
+        **kwargs,
+    ):
+        """Gives one or multiple support areas in the scene a string identifier which can be used for e.g. placement.
+
+        Args:
+            label (str): String identifier.
+            gravity ([np.ndarray], optional): Gravity vector in scene coordinates. Defaults to np.array([0, 0, -1.0]).
+            gravity_tolerance (float, optional): Tolerance for comparsion between surface normals and gravity vector (dot product). Defaults to 0.5.
+            erosion_distance (float, optional): Clearance from support surface edges. Defaults to 0.02.
+            layer (str, optional): Layer name to search for support geometries. Defaults to 'collision'.
+            **obj_ids (str): Regular expression of object identifiers to use for finding supports.
+            **geom_ids (str): Regular expression of geometry identifiers to use for finding supports.
+            **min_area (float): Minimum area of support facets [m^2]. Defaults to 0.01.
+            **consider_support_polyhedra (bool): If set to True, will sample raycasts to ensure support surface has a "roof". Can be used to exclude top surfaces in shelves.
+            **exclude_support_polyhedra (bool): If set to True, will exclude support surfaces that has a "roof". Default to False.
+            **min_x (float): Minimum x coordinate in scene.
+            **min_y (float): Minimum y coordinate in scene.
+            **min_z (float): Minimum z coordinate in scene.
+            **max_x (float): Maximum x coordinate in scene.
+            **max_y (float): Maximum y coordinate in scene.
+            **max_z (float): Maximum z coordinate in scene.
+
+        Returns:
+            list[trimesh.path.polygons.Polygon]: List of support polygons.
+            list[np.ndarray]: List of homogenous 4x4 matrices describing the polygon poses in scene coordinates.
+            list[str]: List of node names that represent the reference frames for the transformations.
+            list[int]: List of facet indices of the mesh that form the support polygon.
+        """
+        support_data = self._get_support_polygons(
+            gravity=gravity,
+            gravity_tolerance=gravity_tolerance,
+            erosion_distance=erosion_distance,
+            layer=layer,
+            **kwargs,
+        )
+
+        if kwargs.get("consider_support_polyhedra", False):
+            (
+                is_support_polyhedra,
+                _,
+            ) = self._get_support_polyhedra(support_surfaces=support_data)
+            log.info(
+                f"Only {np.sum(is_support_polyhedra)}/{len(is_support_polyhedra)} support surfaces"
+                " used for placing objects"
+            )
+
+            support_data = [s for (s, b) in zip(support_data, is_support_polyhedra) if b]
+        elif kwargs.get("exclude_support_polyhedra", False):
+            (
+                is_support_polyhedra,
+                _,
+            ) = self._get_support_polyhedra(support_surfaces=support_data)
+            support_data = [s for (s, b) in zip(support_data, is_support_polyhedra) if not b]
+
+        if len(support_data) == 0:
+            log.warning(f"No supports found for label '{label}'.")
+        else:
+            self._scene.metadata["support_polygons"][label] = support_data
+
+        return support_data
+
+    # modify original _get_support_polyhedra that does not consider the scene instance
+    # when doing ray casting (i.e., check if there is a roof above the support surface)
+    def _get_support_polyhedra(
+        self,
+        support_surfaces=None,
+        min_volume=0.000001,
+        distance_above_support=0.001,
+        min_area=0.01,
+        gravity=np.array([0, 0, -1.0]),
+        gravity_tolerance=0.1,
+        erosion_distance=0.02,
+        ray_cast_count=10,
+        max_height=10.0,
+        layer="collision",
+        **kwargs,
+    ):
+        """Creates support polyhedra which are volumes created by extruding support polygons until collision.
+
+        Args:
+            min_volume (float, optional): Only return polyhedra with volume greater than this minimum. Defaults to 0.000001.
+            distance_above_support (float, optional): Support polyhedra are above the support polygon by this amount. Defaults to 0.001.
+            min_area (float, optional): See _get_support_polyhedra. Defaults to 0.01.
+            gravity (np.ndarray, optional): See _get_support_polyhedra. Defaults to np.array([0, 0, -1.0]).
+            erosion_distance (float, optional): See _get_support_polyhedra. Defaults to 0.02.
+            ray_cast_count (int, optional): For testing collisions to extrude support polygons. Defaults to 10.
+            max_height (float, optional): Maximum height for container volume (in extrusion direction). Defaults to 10.0.
+            layer (str, optional): Name of the layer of the support geometry. Defaults to 'collision'.
+            **obj_ids (str): Regular expression of object ids to consider.
+            **geom_ids (str): Regular expression of geometry identifiers to use for finding supports.
+            **min_x (float): Minimum x coordinate in scene.
+            **min_y (float): Minimum y coordinate in scene.
+            **min_z (float): Minimum z coordinate in scene.
+            **max_x (float): Maximum x coordinate in scene.
+            **max_y (float): Maximum y coordinate in scene.
+            **max_z (float): Maximum z coordinate in scene.
+
+        Returns:
+            list[trimesh.Trimesh]: Support polyhedra in the scene that satisfy the filter criteria.
+        """
+        if support_surfaces is None:
+            support_surfaces = self._get_support_polygons(
+                min_area=min_area,
+                gravity=gravity,
+                gravity_tolerance=gravity_tolerance,
+                erosion_distance=erosion_distance,
+                layer=layer,
+                **kwargs,
+            )
+
+        if len(support_surfaces) == 0:
+            log.warning("Warning! No support polygons selected.")
+
+        support_polyhedra = []
+        support_polyhedra_mask = []
+
+        # Modified by <jshang>: do not use the entire scene, use the mesh it self
+        # (see below in the for loop)
+        # original version `scene_mesh = self._scene.dump(concatenate=True)`
+        # use the no relationship version so that all other objects are eliminated 
+        # this is to ensure that the ray casting only consider the support object itself
+        asset_mesh_cache = {}
+
+        for support_surface in support_surfaces:
+            print (
+                support_surface.node_name,  
+                # support_surface.transform
+            )
+            support_obj_name = os.path.dirname(support_surface.node_name)
+            if support_obj_name not in asset_mesh_cache:
+                asset = self.assets.get(support_obj_name, None)
+                if asset is None:
+                    asset = self._plane_asset
+                
+                support_obj_transform = self._scene.graph.get(support_obj_name)[0]
+                # print ("support_obj_transform:", support_obj_transform[..., :3, 3])
+                scene_mesh = asset.mesh().copy().apply_transform(support_obj_transform)
+                asset_mesh_cache[support_obj_name] = scene_mesh
+            else:
+                scene_mesh = asset_mesh_cache[support_obj_name]
+                # print ("asset bound in get polyhedra", scene_mesh.bounding_box_oriented.bounds)
+            # scene_mesh.show()
+            (is_support_polyhedra, inscribing_polyhedra,) = self._compute_support_polyhedra(
+                support_surface=support_surface,
+                mesh=scene_mesh,
+                gravity=gravity,
+                ray_cast_count=ray_cast_count,
+                min_volume=min_volume,
+                distance_above_support=distance_above_support,
+                max_height=max_height,
+                erosion_distance=erosion_distance,
+                # debug=True
+            )
+            print (f"is_support_polyhedra {is_support_polyhedra}")
+            if is_support_polyhedra:
+                support_polyhedra.append(
+                    Container(
+                        geometry=inscribing_polyhedra,
+                        node_name=support_surface.node_name,
+                        transform=support_surface.transform,
+                        support_surface=support_surface,
+                    )
+                )
+
+            support_polyhedra_mask.append(is_support_polyhedra)
+        
+        del asset_mesh_cache
+
+        return (
+            support_polyhedra_mask,
+            support_polyhedra,
+        )
+
+    def _compute_support_polyhedra(
+        self,
+        support_surface,
+        mesh,
+        gravity,
+        ray_cast_count,
+        min_volume,
+        distance_above_support,
+        max_height,
+        erosion_distance,
+        **kwargs,
+    ):
+        """
+        Modify original _compute_support_polyhedra to fix bugs.
+        """
+        origins, intersections = self._raycast_surface(
+            support_surface=support_surface,
+            ray_cast_count=ray_cast_count,
+            mesh=mesh,
+            gravity=gravity,
+            distance_above_support=distance_above_support,
+            **kwargs,
+        )
+
+        # if no intersection occurs we don't deem this a support polyhedra (e.g. top of shelf or table)
+        if len(intersections) > 0:
+            distances = np.linalg.norm((intersections - origins), axis=1)
+            min_distance = np.min(distances)
+            assert min_distance >= 0
+
+            # <jshang> comment: distance within max_height
+            if min_distance >= trimesh.constants.tol.merge and min_distance <= max_height:
+                if support_surface.polygon.geom_type == "MultiPolygon":
+                    # This is probably due to the erosion operation when creating supports
+                    return False, None
+
+                # <jshang> comment: filter out the height less than erosion_distance
+                # but we first fix this by setting `erosion_distance` threshold to 1e-5
+                # print ("min_distance", min_distance, "erosion_distance", erosion_distance)
+                if (min_distance - erosion_distance) > 0:
+                    inscribing_polyhedra = trimesh.creation.extrude_polygon(
+                        support_surface.polygon, min_distance - erosion_distance, engine="triangle"
+                    )
+                else:
+                    return False, None
+
+                if inscribing_polyhedra.volume >= min_volume:
+                    return True, inscribing_polyhedra
+
+        return False, None
     
     # void this function in the super class to speed up
     def sync_collision_manager(self):
         pass
+
+    # for debug temp modifying:
+    def _raycast_surface(
+        self,
+        support_surface,
+        ray_cast_count,
+        mesh=None,
+        gravity=None,
+        distance_above_support=1e-3,
+        debug=False,
+    ):
+        """
+        Extrudes a support polygon until collision.
+
+        Args:
+            support_surface (SupportSurface): The support surface.
+            ray_cast_count (int, optional): For testing collisions to extrude support polygons.
+            mesh (trimesh.Trimesh, optional): Defaults to the scene's mesh.
+            gravity (np.ndarray, optional): Defaults to np.array([0, 0, -1]) in the surface's coordinate frame.
+            distance_above_support (float, optional): Support polyhedra are above the support polygon by this amount.
+            debug (bool, optional): Whether to visualize the raycasting results.
+
+        Returns:
+            list[np.ndarray]: List of ray origins on the surface.
+            list[np.ndarray]: List of ray intersections on the mesh.
+        """
+        # for each support polygon, sample raycasts to determine maximum height of extrusion in direction of gravity
+        pts = utils.sample_polygon(support_surface.polygon, count=ray_cast_count, seed=self._rng)
+        # pts = np.array(support_surface.polygon.exterior.coords)
+
+        if len(pts) == 0:
+            return [], []
+
+        pts3d_local = np.column_stack([pts, distance_above_support * np.ones(len(pts))])
+        T = self._scene.graph.get(support_surface.node_name)[0] @ support_surface.transform
+        pts3d = trimesh.transform_points(points=pts3d_local, matrix=T)
+
+        if mesh is None:
+            mesh = self._scene.dump(concatenate=True)
+        if gravity is None:
+            gravity = T[:3, :3] @ np.array([0, 0, -1])
+        
+        # print ("gravity", gravity)
+
+        import trimesh.transformations as tra
+        intersections, ray_ids, _ = self._raycasts(
+            origins=pts3d,
+            directions=np.array(len(pts) * [list(-tra.unit_vector(gravity))]),
+            mesh=mesh,
+        )
+        # print ("intersections", len(intersections))
+        if len(intersections) == 0:
+            return [], []
+
+        origins = pts3d[ray_ids]
+        if debug:
+            surface_color = utils.random_color(seed=self._rng)
+            surface_path = trimesh.load_path(support_surface.polygon).to_3D().apply_transform(T)
+            surface_path.colors = len(surface_path.entities) * [surface_color]
+            ray_path = trimesh.load_path(
+                np.swapaxes(np.stack([origins, intersections], axis=2), 1, 2)
+            )
+            # print ("=====Raycasting Results=====")
+            # print ("origins", origins)
+            # print ("intersections", intersections)
+            # print ("ray_ids", ray_ids)
+            trimesh.Scene([mesh, surface_path, ray_path]).show()
+
+        return origins, intersections
