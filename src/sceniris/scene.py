@@ -224,7 +224,7 @@ class Scene(_Scene):
             # in mesh (center, center, bottom). So an additional offset on z is needed to raise the spheres up
             # otherwise it always collides with the support surface
             # local_T is supposed to do this but it doesn't work for some reason
-            sph_pos[..., 2] += mesh_height / 2
+            # sph_pos[..., 2] += mesh_height / 2
             # -------------
             sph_pos_homo = torch.cat([sph_pos, torch.ones((n_sph, 1), dtype=torch.float32)], dim=1) # (n_sph, 4)
             sph_pos_homo = sph_pos_homo.unsqueeze(0).unsqueeze(-1) # (1, n_sph, 4, 1)
