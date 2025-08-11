@@ -413,6 +413,8 @@ class Scene(_Scene):
                     pos = pos_raw
                     support = position_iterator.support
 
+                print ("support", support)
+
                 # To avoid collisions with the support surface
                 pos3d = np.concatenate([pos, np.full((pos.shape[0], 1), distance_above_support)], axis=1) \
                     if pos.shape[-1] == 2 else pos  # normalized surface
@@ -423,32 +425,27 @@ class Scene(_Scene):
                 if isinstance(support, np.ndarray):
                     # transform 3D coordinate with respect to the normalized surface to mesh frame
                     support_transforms = get_support_transforms(support)
-                    # print ("support_transforms", support_transforms[..., :3, 3])
-                    # print (support_transforms.shape, pos3d.shape, ori.shape)
                     placement_T = support_transforms @ point_to_translation_matrix(pos3d) @ ori
-                    # print ("placement T", placement_T[..., :3, 3])
-                    # print ("placement T shape", placement_T.shape)
                     support_node_names = get_support_node_names(support)
                     parent_to_support_node = get_transform_batch(
-                        self, support_node_names, frame_from=parent_id)[0] # parent -> mesh
-                    if len(parent_to_support_node.shape) == 3:
-                        parent_to_support_node = parent_to_support_node[working_env_ids]
+                        self, support_node_names, frame_from=parent_id) # parent -> mesh
+                    # support_node_names already has the same length as working_env_ids, so no need to index
                 elif isinstance(support, SupportSurface):
                     placement_T = support.transform @ point_to_translation_matrix(pos3d) @ ori
-                    # print ("support transform", support.transform[..., :3, 3])
-                    # print ("coord on scene node", placement_T[:, :3, 3])
                     parent_to_support_node = scene_graph_transform_get(
                         self._scene.graph, 
                         support.node_name,
                         frame_from=parent_id, 
                         edge_batch=self.edge_batch, 
                         cache=self.cache)[0] # parent -> mesh
+                    # only one support node, so need to index after getting transforms from all envs
                     if len(parent_to_support_node.shape) == 3:
-                        parent_to_support_node = parent_to_support_node[working_env_ids] 
+                        parent_to_support_node = parent_to_support_node[working_env_ids]
                     support_node_names = [support.node_name]
                 else:
                     raise ValueError(f"Invalid supports: {support}")
 
+                print ("placement_T before parent to support node", placement_T[..., :3, 3])
                 print ("parent_to_support_node", parent_to_support_node[..., :3, 3])
                 placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
                 print (f"placement T {placement_T[..., :3, 3]}")
@@ -1091,7 +1088,7 @@ class Scene(_Scene):
                 erosion_distance = 0.0
             placement_args["erosion_distance"] = erosion_distance
             # print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
-            print ("support_id", support_id, "parent_id", parent_id, "relation_to_parent", relation_to_parent)
+            # print ("support_id", support_id, "parent_id", parent_id, "relation_to_parent", relation_to_parent)
             if support_id not in self._scene.metadata["support_polygons"]:
                 if relation_to_parent == "top":
                     self.label_support(
@@ -1106,7 +1103,7 @@ class Scene(_Scene):
                         geom_ids=parent_id, 
                         min_area=0.04, 
                     )
-            print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
+            # print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
         placement_args["support_id"] = support_id
 
         # position and orientation
@@ -1439,10 +1436,10 @@ class Scene(_Scene):
         asset_mesh_cache = {}
 
         for support_surface in support_surfaces:
-            print (
-                support_surface.node_name,  
-                # support_surface.transform
-            )
+            # print (
+            #     support_surface.node_name,  
+            #     # support_surface.transform
+            # )
             support_obj_name = os.path.dirname(support_surface.node_name)
             if support_obj_name not in asset_mesh_cache:
                 asset = self.assets.get(support_obj_name, None)
@@ -1468,7 +1465,7 @@ class Scene(_Scene):
                 erosion_distance=erosion_distance,
                 # debug=True
             )
-            print (f"is_support_polyhedra {is_support_polyhedra}")
+            # print (f"is_support_polyhedra {is_support_polyhedra}")
             if is_support_polyhedra:
                 support_polyhedra.append(
                     Container(
@@ -1527,15 +1524,16 @@ class Scene(_Scene):
                 # <jshang> comment: filter out the height less than erosion_distance
                 # but we first fix this by setting `erosion_distance` threshold to 1e-5
                 # print ("min_distance", min_distance, "erosion_distance", erosion_distance)
-                if (min_distance - erosion_distance) > 0:
-                    inscribing_polyhedra = trimesh.creation.extrude_polygon(
-                        support_surface.polygon, min_distance - erosion_distance, engine="triangle"
-                    )
-                else:
-                    return False, None
+                # if (min_distance - erosion_distance) > 0:
+                inscribing_polyhedra = trimesh.creation.extrude_polygon(
+                    support_surface.polygon, min_distance - erosion_distance, engine="triangle"
+                )
+                # else:
+                    # return False, None
 
-                if inscribing_polyhedra.volume >= min_volume:
-                    return True, inscribing_polyhedra
+                # if inscribing_polyhedra.volume >= min_volume:
+                    # return True, inscribing_polyhedra
+                return True, inscribing_polyhedra
 
         return False, None
     
