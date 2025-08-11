@@ -2,6 +2,7 @@ from typing import Any
 
 import itertools
 import os
+import re
 import time
 import logging
 import networkx as nx
@@ -11,6 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 import trimesh
+import trimesh.transformations as tra
 import torch
 
 from curobo.types.base import TensorDeviceType
@@ -803,9 +805,9 @@ class Scene(_Scene):
         for i, obj_id in enumerate(self._gen_node_order):
             if obj_id in self.assets:
                 # give assets enough space so that the lable_support can work properly
-                init_pos = np.array([100*i, 100*i, 100*i])
+                # init_pos = np.array([100*i, 100*i, 100*i])
                 init_transform = np.eye(4)
-                init_transform[:3, 3] = init_pos
+                # init_transform[:3, 3] = init_pos
                 self.add_object(
                     obj_id=obj_id,
                     asset=self.assets[obj_id],
@@ -1086,13 +1088,14 @@ class Scene(_Scene):
                         support_id, 
                         geom_ids=parent_id, 
                         exclude_support_polyhedra=True, 
-                        min_area=0.04, 
+                        min_area=0.005, 
                     )
                 elif relation_to_parent == "inside":
                     self.label_support(
                         support_id, 
                         geom_ids=parent_id, 
-                        min_area=0.04, 
+                        min_area=0.005,
+                        consider_support_polyhedra=True,
                     )
             logger.debug(f'existing supports, {list(self._scene.metadata["support_polygons"].keys())}')
         placement_args["support_id"] = support_id
@@ -1348,7 +1351,6 @@ class Scene(_Scene):
                 f"Only {np.sum(is_support_polyhedra)}/{len(is_support_polyhedra)} support surfaces"
                 " used for placing objects"
             )
-
             support_data = [s for (s, b) in zip(support_data, is_support_polyhedra) if b]
         elif kwargs.get("exclude_support_polyhedra", False):
             (
@@ -1448,8 +1450,9 @@ class Scene(_Scene):
                 distance_above_support=distance_above_support,
                 max_height=max_height,
                 erosion_distance=erosion_distance,
-                # debug=True
+                debug=True
             )
+            print (f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             logger.debug(f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             if is_support_polyhedra:
                 support_polyhedra.append(
