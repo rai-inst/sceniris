@@ -1450,9 +1450,9 @@ class Scene(_Scene):
                 distance_above_support=distance_above_support,
                 max_height=max_height,
                 erosion_distance=erosion_distance,
-                debug=True
+                # debug=True
             )
-            print (f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
+            # print (f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             logger.debug(f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             if is_support_polyhedra:
                 support_polyhedra.append(
