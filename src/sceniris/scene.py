@@ -3,6 +3,7 @@ from typing import Any
 import itertools
 import os
 import time
+import logging
 import networkx as nx
 from collections import defaultdict
 
@@ -26,7 +27,6 @@ from curobo.geom.sdf.world_mesh import WorldMeshCollision
 from scene_synthesizer import Scene as _Scene
 from scene_synthesizer.scene import SupportSurface, Container
 from scene_synthesizer.assets import PlaneAsset
-from scene_synthesizer.utils import log
 from scene_synthesizer import utils
 try:
     from pyglet.app import run as _pyglet_app_run
@@ -58,6 +58,7 @@ from sceniris.utils import (
 from sceniris.constraints import SurfaceRelation, TrackingTransform
 from sceniris.asset import Asset
 
+logger = logging.getLogger("sceniris")
 
 class Scene(_Scene):
     def __init__(
@@ -166,7 +167,6 @@ class Scene(_Scene):
                         )
                         meshes.append(mesh)
                 world_configs.append(WorldConfig(mesh=meshes))
-            # print (world_configs)
             world_coll_config = WorldCollisionConfig(
                 tensor_args, world_model=world_configs
             )
@@ -176,7 +176,6 @@ class Scene(_Scene):
         if len(query_obj_T.shape) == 2:
             query_obj_T = np.tile(query_obj_T, (len(env_ids), 1, 1))
         query_obj_pose = torch.from_numpy(query_obj_T).to(torch.float32)
-        # print ("query_obj_pose", query_obj_id, query_obj_pose[:, :3, 3])
 
         query_obj_scene = query_obj_asset.as_trimesh_scene(use_collision_geometry=True)
         query_obj_edge_batch = {}
@@ -201,18 +200,18 @@ class Scene(_Scene):
                 pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
                 file_path=mesh_file_path,
             )
-            # print ("query_mesh_bounds", node_name, mesh.bounds)
+
             mesh_height = mesh.bounds[1, 2] - mesh.bounds[0, 2]
             # mesh is in original frame
             # the origin is reflected in transform in the scene graph (local_T below)
             local_T = scene_graph_transform_get(
                 query_obj_scene.graph, node_name, edge_batch=query_obj_edge_batch, cache={}
             )[0].copy() # (N, 4, 4) or (4, 4)
-            # print ("local_T", local_T[..., :3, 3])
+
             local_T.flags["WRITEABLE"] = True
             local_T = torch.from_numpy(local_T).to(torch.float32)
             local_T = query_obj_pose @ local_T # (N, 4, 4) because query_obj_pose is (N, 4, 4)
-            # print ("local_T after query_obj_pose", local_T[..., :3, 3])
+
             n_sph = N_SPH_BASE
             query_sph_approx = query_mesh.get_bounding_spheres(n_spheres=n_sph)
             n_sph = len(query_sph_approx)
@@ -376,7 +375,7 @@ class Scene(_Scene):
                                     continue
                                 pos_raw["samples"].append(env_pos_raw["samples"])
                                 pos_raw["support_refs"].append(env_pos_raw["support_refs"])
-                                print (f"env_pos_raw", env_pos_raw)
+                                logger.debug(f"env_pos_raw, {env_pos_raw}")
                             else: # PositionIterator2D or PositionIteratorNone
                                 # skip invalid samples
                                 if np.isnan(env_pos_raw).any():
@@ -386,7 +385,6 @@ class Scene(_Scene):
                                 pos_raw["support_refs"].append(np.array([env_position_iterator[env_idx].support])) # could be None
                             working_env_ids.append(env_idx)
                             # filter out nan pos from PositionIteratorNone (means no valid positions)
-                        # print ("pos_raw", pos_raw)
                         working_env_ids = torch.from_numpy(np.array(working_env_ids)).to(torch.int32)
                         n_working_envs = len(working_env_ids)
                         try:
@@ -394,8 +392,6 @@ class Scene(_Scene):
                             pos_raw["support_refs"] = np.concatenate(pos_raw["support_refs"], axis=0)
                         except ValueError as e:
                             return env_ids
-                        # print (f"iterate over constraints taken: {time.time() - st:.4f}s")
-                        log.debug (f"iterate over constraints {(time.time() - st):.6f}s")
                     else:
                         pos_raw = position_iterator.sample(n_working_envs)
                         working_env_ids = env_ids[:]
@@ -413,13 +409,13 @@ class Scene(_Scene):
                     pos = pos_raw
                     support = position_iterator.support
 
-                print ("support", support)
+                logger.debug(f"support, {support}")
 
                 # To avoid collisions with the support surface
                 pos3d = np.concatenate([pos, np.full((pos.shape[0], 1), distance_above_support)], axis=1) \
                     if pos.shape[-1] == 2 else pos  # normalized surface
 
-                print (f"{obj_id} sampled pos", pos3d)
+                logger.debug(f"{obj_id} sampled pos, {pos3d}")
 
                 # Transform plane coordinates into scene coordinates
                 if isinstance(support, np.ndarray):
@@ -445,10 +441,10 @@ class Scene(_Scene):
                 else:
                     raise ValueError(f"Invalid supports: {support}")
 
-                print ("placement_T before parent to support node", placement_T[..., :3, 3])
-                print ("parent_to_support_node", parent_to_support_node[..., :3, 3])
+                logger.debug(f"placement_T before parent to support node, {placement_T[..., :3, 3]}")
+                logger.debug(f"parent_to_support_node, {parent_to_support_node[..., :3, 3]}")
                 placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
-                print (f"placement T {placement_T[..., :3, 3]}")
+                logger.debug(f"placement T, {placement_T[..., :3, 3]}")
                 
                 if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
                     world_to_parent = scene_graph_transform_get(
@@ -459,7 +455,7 @@ class Scene(_Scene):
                     world_to_parent = np.eye(4)
             
                 world_T = world_to_parent @ placement_T # T_w_obj
-                print (f"world T {world_T[..., :3, 3]}")
+                logger.debug(f"world T, {world_T[..., :3, 3]}")
 
                 joint_values = []
                 if joint_states is not None and len(joint_states) > 0:
@@ -483,13 +479,12 @@ class Scene(_Scene):
                     for joint_idx, jid in enumerate(joint_ids):
                         self.joint_states[obj_id][jid][working_env_ids] = joint_values[:, joint_idx]
 
-                # print (f"update joint values taken: {time.time() - st:.4f}s")
                 # Check custom validity function
                 # disable for now
 
                 # Check collisions
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
-                print (f"placing {obj_id} has collision", has_collision.sum().item())
+                logger.debug(f"placing {obj_id} has collision, {has_collision.sum().item()}")
 
                 retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
@@ -508,16 +503,16 @@ class Scene(_Scene):
 
                 env_ids = retry_env_ids
                 if len(env_ids) == 0:
-                    log.debug(f"{obj_id} succesfully placed")
+                    logger.debug(f"{obj_id} succesfully placed")
                     break
-                log.debug(f"{len(env_ids)} envs have collision, retrying")
+                logger.debug(f"{len(env_ids)} envs have collision, retrying")
                 iter += 1
             
             if len(env_ids) > 0:
-                log.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
+                logger.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
                 return env_ids.numpy() # return invalid env_ids
 
-            log.debug(f"Adding {obj_id} to {parent_id}")
+            logger.debug(f"Adding {obj_id} to {parent_id}")
             
             # use env0 transform to update trimesh scene
             trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
@@ -602,7 +597,7 @@ class Scene(_Scene):
                     env_obj_position_iterator = []
                     scene_support = constraint.scene_supports
                     for env_idx in range(self.num_envs):
-                        print (f"len(scene_support[env_idx])", len(scene_support[env_idx]))
+                        logger.debug(f"number of supports for env {env_idx}, {len(scene_support[env_idx])}")
                         if len(scene_support[env_idx]) == 0:
                             env_obj_position_iterator.append(
                                 PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)
@@ -629,7 +624,7 @@ class Scene(_Scene):
                             )
                     obj_position_iterators = [env_obj_position_iterator[0]]
                 else:
-                    print (f"support polygon counts {support_id}", len(self._scene.metadata["support_polygons"][support_id]))
+                    logger.debug(f'support polygon counts {support_id}, {len(self._scene.metadata["support_polygons"][support_id])}')
                     obj_position_iterators = [
                         PositionIteratorUniform(
                             seed=self._rng, replenish_size=self.num_envs*2, 
@@ -896,7 +891,6 @@ class Scene(_Scene):
                         continue
                     mesh_transform = scene_graph_transform_get(
                         self._scene.graph, mesh_node_name, edge_batch=self.edge_batch, cache=self.cache)[0]
-                    # print ("updating curobo world ccheck", mesh_node_name, mesh_transform[..., :3, 3])
                     # to directly modify _mesh_tensor_list[1] (mesh's world ccheck transform), use inverse transform
                     # quat is wxyz
                     pos, quat = batch_transform_matrix_to_vectors(homogeneous_inv_batch(mesh_transform), wxyz=True) 
@@ -1074,11 +1068,10 @@ class Scene(_Scene):
         # support surface: composing support_id and label it if it does not exist
         support_id = parent_id
         asset_minxy_length = min(self.assets_extents[obj_id][:2])
-        print (obj_id, "asset_minxy_length:", asset_minxy_length)
+        logger.debug(obj_id, "asset_minxy_length:", asset_minxy_length)
         if support_id is not None:
             # assign support id. each object placed on the support will have its unique support id.
             support_id = f"_support_{support_id}_{relation_to_parent}"
-            # print (f"label support id {support_id}")
             ratio_on_support = obj_cfg.get("ratio_on_support", 0.0)
             if ratio_on_support is not None:
                 ratio_on_support = min(1.0, ratio_on_support)
@@ -1087,8 +1080,6 @@ class Scene(_Scene):
             else:
                 erosion_distance = 0.0
             placement_args["erosion_distance"] = erosion_distance
-            # print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
-            # print ("support_id", support_id, "parent_id", parent_id, "relation_to_parent", relation_to_parent)
             if support_id not in self._scene.metadata["support_polygons"]:
                 if relation_to_parent == "top":
                     self.label_support(
@@ -1103,7 +1094,7 @@ class Scene(_Scene):
                         geom_ids=parent_id, 
                         min_area=0.04, 
                     )
-            # print ("existing supports", list(self._scene.metadata["support_polygons"].keys()))
+            logger.debug(f'existing supports, {list(self._scene.metadata["support_polygons"].keys())}')
         placement_args["support_id"] = support_id
 
         # position and orientation
@@ -1436,10 +1427,6 @@ class Scene(_Scene):
         asset_mesh_cache = {}
 
         for support_surface in support_surfaces:
-            # print (
-            #     support_surface.node_name,  
-            #     # support_surface.transform
-            # )
             support_obj_name = os.path.dirname(support_surface.node_name)
             if support_obj_name not in asset_mesh_cache:
                 asset = self.assets.get(support_obj_name, None)
@@ -1447,13 +1434,11 @@ class Scene(_Scene):
                     asset = self._plane_asset
                 
                 support_obj_transform = self._scene.graph.get(support_obj_name)[0]
-                # print ("support_obj_transform:", support_obj_transform[..., :3, 3])
                 scene_mesh = asset.mesh().copy().apply_transform(support_obj_transform)
                 asset_mesh_cache[support_obj_name] = scene_mesh
             else:
                 scene_mesh = asset_mesh_cache[support_obj_name]
-                # print ("asset bound in get polyhedra", scene_mesh.bounding_box_oriented.bounds)
-            # scene_mesh.show()
+            
             (is_support_polyhedra, inscribing_polyhedra,) = self._compute_support_polyhedra(
                 support_surface=support_surface,
                 mesh=scene_mesh,
@@ -1465,7 +1450,7 @@ class Scene(_Scene):
                 erosion_distance=erosion_distance,
                 # debug=True
             )
-            # print (f"is_support_polyhedra {is_support_polyhedra}")
+            logger.debug(f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             if is_support_polyhedra:
                 support_polyhedra.append(
                     Container(
@@ -1515,24 +1500,15 @@ class Scene(_Scene):
             min_distance = np.min(distances)
             assert min_distance >= 0
 
-            # <jshang> comment: distance within max_height
+            # <jshang> modifiation: as long as there is hit, believes it is a support polyhedra
             if min_distance >= trimesh.constants.tol.merge and min_distance <= max_height:
                 if support_surface.polygon.geom_type == "MultiPolygon":
                     # This is probably due to the erosion operation when creating supports
                     return False, None
 
-                # <jshang> comment: filter out the height less than erosion_distance
-                # but we first fix this by setting `erosion_distance` threshold to 1e-5
-                # print ("min_distance", min_distance, "erosion_distance", erosion_distance)
-                # if (min_distance - erosion_distance) > 0:
                 inscribing_polyhedra = trimesh.creation.extrude_polygon(
                     support_surface.polygon, min_distance - erosion_distance, engine="triangle"
                 )
-                # else:
-                    # return False, None
-
-                # if inscribing_polyhedra.volume >= min_volume:
-                    # return True, inscribing_polyhedra
                 return True, inscribing_polyhedra
 
         return False, None
@@ -1581,8 +1557,6 @@ class Scene(_Scene):
             mesh = self._scene.dump(concatenate=True)
         if gravity is None:
             gravity = T[:3, :3] @ np.array([0, 0, -1])
-        
-        # print ("gravity", gravity)
 
         import trimesh.transformations as tra
         intersections, ray_ids, _ = self._raycasts(
@@ -1590,7 +1564,7 @@ class Scene(_Scene):
             directions=np.array(len(pts) * [list(-tra.unit_vector(gravity))]),
             mesh=mesh,
         )
-        # print ("intersections", len(intersections))
+
         if len(intersections) == 0:
             return [], []
 
