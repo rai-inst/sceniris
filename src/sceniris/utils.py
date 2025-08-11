@@ -762,3 +762,30 @@ def visualize_mesh(mesh: NDArray, mesh2: NDArray = None):
     pc1 = trimesh.PointCloud(mesh, colors=np.array([[255, 0, 0, 255]]*len(mesh), dtype=np.uint8))
     pc2 = trimesh.PointCloud(mesh2, colors=np.array([[0, 0, 255, 255]]*len(mesh2), dtype=np.uint8))
     trimesh.Scene([pc1, pc2]).show()
+
+
+def visualize_polygon(polygon: Polygon):
+    """Visualize a polygon.
+
+    Args:
+        polygon (Polygon): the polygon to visualize.
+    """
+    import matplotlib.pyplot as plt
+    from shapely.plotting import plot_polygon
+    fig, ax = plt.subplots()
+    plot_polygon(polygon, ax=ax)
+    plt.show()
+
+def visualize_polygons(polygons: list[Polygon]):
+    """Visualize a list of polygons.
+
+    Args:
+        polygons (list[Polygon]): the list of polygons to visualize.
+    """
+    import matplotlib.pyplot as plt
+    from shapely.plotting import plot_polygon
+    fig, ax = plt.subplots()
+    colors = ["red", "blue", "green", "yellow", "purple", "orange", "brown", "pink", "gray", "black"]
+    for i, polygon in enumerate(polygons):
+        plot_polygon(polygon, ax=ax, color=colors[i])
+    plt.show()

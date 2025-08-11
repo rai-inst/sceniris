@@ -22,6 +22,28 @@ class Asset(_Asset):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._trimesh_scene_collision = {}
+        self._trimesh_scene = {}
+        self.combined_mesh_cache = None
+        self._collision_node_names = None
+        self._node_name_T_mesh_list = None
+        self.mesh_cache = {}
+
+    def as_trimesh_scene(self, namespace="object", use_collision_geometry=True):
+        if use_collision_geometry:
+            if not hasattr(self, "_trimesh_scene_collision") or self._trimesh_scene_collision.get(namespace) is None:
+                if not hasattr(self, "_trimesh_scene_collision"):
+                    self._trimesh_scene_collision = {}
+                self._trimesh_scene_collision[namespace] = super().as_trimesh_scene(
+                    namespace=namespace, use_collision_geometry=use_collision_geometry)
+            return self._trimesh_scene_collision[namespace]
+        else:
+            if not hasattr(self, "_trimesh_scene") or self._trimesh_scene.get(namespace) is None:
+                if not hasattr(self, "_trimesh_scene"):
+                    self._trimesh_scene = {}
+                self._trimesh_scene[namespace] = super().as_trimesh_scene(
+                    namespace=namespace, use_collision_geometry=use_collision_geometry)
+            return self._trimesh_scene[namespace]
 
     def __new__(cls, *args, **kwargs):
         if len(args) > 0 and isinstance(args[0], str) or "fname" in kwargs:
@@ -108,9 +130,13 @@ class Asset(_Asset):
         Returns:
             list[str]: The collision geometry node names.
         """
-        scene = self.as_trimesh_scene(use_collision_geometry=True)
+        if self._collision_node_names is not None:
+            return self._collision_node_names
+        
+        scene = self._trimesh_scene_collision["object"](use_collision_geometry=True)
         node_names = scene.graph.nodes_geometry
-        return self._filter_collision_geometry(node_names)
+        self._collision_node_names = self._filter_collision_geometry(node_names)
+        return self._collision_node_names
 
     def node_named_geometries(self, use_collision_geometry=True) -> list[tuple[str, NDArray, trimesh.Trimesh]]:
         """Get the node name, transform, and the geometry of each sub node in the asset.
@@ -121,9 +147,12 @@ class Asset(_Asset):
         Returns:
             list[tuple[str, NDArray, trimesh.Trimesh]]: The node name, transform, and the geometry of each sub node.
         """
+        if hasattr(self, "_node_name_T_mesh_list") and self._node_name_T_mesh_list is not None:
+            return self._node_name_T_mesh_list
+        
         # don't know why this use_collision_geometry is not working in scene_synthesizer
         # so we need to filter the collision geometry manually
-        scene = self.as_trimesh_scene(use_collision_geometry=use_collision_geometry)
+        scene = self._trimesh_scene_collision["object"]
         node_name_T_mesh_list = []
         node_names = scene.graph.nodes_geometry
         if use_collision_geometry:
@@ -132,27 +161,37 @@ class Asset(_Asset):
             T, geom_name = scene.graph.get(node_name)
             mesh = scene.geometry[geom_name]
             node_name_T_mesh_list.append((node_name, T, mesh))
-        return node_name_T_mesh_list
+        self._node_name_T_mesh_list = node_name_T_mesh_list
+        return self._node_name_T_mesh_list
 
+    def mesh(self, use_collision_geometry=False):
+        if hasattr(self, "_combined_mesh") and self._combined_mesh is not None:
+            return self._combined_mesh
+        
+        node_name_T_mesh_list = self.node_named_geometries(use_collision_geometry=use_collision_geometry)
+        self._combined_mesh = trimesh.util.concatenate(
+            [mesh.apply_transform(T) for _, T, mesh in node_name_T_mesh_list]
+        )
+        return self._combined_mesh
 
 # override scene_synthesizer's Asset classes to use our modified Asset class
-class URDFAsset(_URDFAsset, Asset):
+class URDFAsset(Asset, _URDFAsset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-class USDAsset(_USDAsset, Asset):
+class USDAsset(Asset, _USDAsset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-class MJCFAsset(_MJCFAsset, Asset):
+class MJCFAsset(Asset, _MJCFAsset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-class OpenSCADAsset(_OpenSCADAsset, Asset):
+class OpenSCADAsset(Asset, _OpenSCADAsset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-class MeshAsset(_MeshAsset, Asset):
+class MeshAsset(Asset, _MeshAsset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

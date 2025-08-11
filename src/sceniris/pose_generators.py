@@ -3,7 +3,7 @@ from shapely import intersection, MultiPolygon, Polygon
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
-from scene_synthesizer.utils import sample_volume_mesh, sample_polygon
+from scene_synthesizer.utils import sample_volume_mesh, sample_polygon as _sample_polygon
 
 from sceniris.utils import sample_random_z_rotations, check_within_polygon
 
@@ -16,6 +16,14 @@ DEFAULT_REPLISH_SIZE = 2
 """
 This file defines new pose generators that support batch generation and caching compared to scene_synthesizer.
 """
+
+
+def sample_polygon(polygon, count, factor=1.5, max_iter=10, seed=None):
+    """Override the sample_polygon function in scene_synthesizer.utils to support empty polygon.
+    """
+    if polygon.is_empty:
+        return np.full((count, 2), np.nan, dtype=np.float32)
+    return _sample_polygon(polygon, count, factor, max_iter, seed)
 
 class PoseGenerator:
     def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
@@ -137,21 +145,23 @@ class PositionIteratorUniform3D(PositionIterator3D):
 
 
 class PositionIterator2D(PoseGenerator):
-    def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE, xy_limit=None):
+    def __init__(self, seed=None, replenish_size=DEFAULT_REPLISH_SIZE, xy_limit=None, erosion_distance:float=0.0):
         super().__init__(seed, replenish_size)
         self.polygon: Polygon = None
         self.support: SupportSurface = None
         self.sample_buffer: NDArray | list = np.empty((0, 2), dtype=np.float32)
         self.xy_limit = xy_limit
+        self.erosion_distance = erosion_distance
 
     def __iter__(self):
         return self
 
     def __call__(self, support):
         self.polygon = support.polygon
-        if self.xy_limit is not None:
-            vertices = self.polygon.exterior.xy
-            minvx, minvy, maxvx, maxvy = np.min(vertices[0]), np.min(vertices[1]), np.max(vertices[0]), np.max(vertices[1])
+        original_polygon = self.polygon
+        
+        if (not self.polygon.is_empty) and self.xy_limit is not None:
+            minvx, minvy, maxvx, maxvy = self.polygon.exterior.bounds
             low_x = self.xy_limit[0][0] * (maxvx - minvx) + minvx
             low_y = self.xy_limit[0][1] * (maxvy - minvy) + minvy
             high_x = self.xy_limit[1][0] * (maxvx - minvx) + minvx
@@ -163,10 +173,18 @@ class PositionIterator2D(PoseGenerator):
                 (low_x, high_y),
             ])
             cropped_polygon = self.polygon.intersection(xy_polygon)
+            # print (f"cropped_polygon area: {cropped_polygon.area:.3f}, original polygon area: {self.polygon.area:.3f}")
             # TODO: deal with MultiPolygon, headache
             if isinstance(cropped_polygon, MultiPolygon):
                 cropped_polygon = cropped_polygon.geoms[0]
             self.polygon = cropped_polygon
+        
+        if self.erosion_distance > 0:
+            self.polygon = self.polygon.buffer(-self.erosion_distance)
+
+        # from sceniris.utils import visualize_polygons
+        # visualize_polygons([original_polygon, xy_polygon, cropped_polygon, self.polygon]) # Red, Blue, Green, Yellow
+        # print ("final polygon area:", self.polygon.area)
 
         self.support = support
         self.sample_buffer = np.empty((0, 2), dtype=np.float32) # reset buffer if changed support
@@ -213,7 +231,6 @@ class PositionIteratorDisk(PositionIterator2D):
         alpha = np.pi * 2 * self.rng.uniform(0, 1, size=self.replenish_size)[np.newaxis, :]
         radius = self.r * np.sqrt(self.rng.uniform(0, 1, size=self.replenish_size))[np.newaxis, :]
         candidate = np.concatenate([radius * np.cos(alpha), radius * np.sin(alpha)], axis=0) + self.center
-
         candidate = candidate[check_within_polygon(self.polygon, candidate)]
 
         self.sample_buffer = np.concatenate([self.sample_buffer, candidate])
@@ -362,6 +379,8 @@ class PositionIterator2DCollection(PositionIterator2D):
                 raise ValueError("PositionIterator2DCollection cannot be nested")
             # filter out None
             if isinstance(pos_iter, PositionIteratorNone):
+                continue
+            if hasattr(pos_iter, "polygon") and pos_iter.polygon.area <= 1e-12:
                 continue
             self.position_iterators.append(pos_iter)
         # self.position_iterators = position_iterators
