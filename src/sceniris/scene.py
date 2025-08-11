@@ -1414,7 +1414,7 @@ class Scene(_Scene):
             )
 
         if len(support_surfaces) == 0:
-            log.warning("Warning! No support polygons selected.")
+            logger.warning("Warning! No support polygons selected.")
 
         support_polyhedra = []
         support_polyhedra_mask = []
