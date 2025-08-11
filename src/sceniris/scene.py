@@ -1344,7 +1344,7 @@ class Scene(_Scene):
                 is_support_polyhedra,
                 _,
             ) = self._get_support_polyhedra(support_surfaces=support_data)
-            log.info(
+            logger.info(
                 f"Only {np.sum(is_support_polyhedra)}/{len(is_support_polyhedra)} support surfaces"
                 " used for placing objects"
             )
@@ -1358,7 +1358,7 @@ class Scene(_Scene):
             support_data = [s for (s, b) in zip(support_data, is_support_polyhedra) if not b]
 
         if len(support_data) == 0:
-            log.warning(f"No supports found for label '{label}'.")
+            logger.warning(f"No supports found for label '{label}'.")
         else:
             self._scene.metadata["support_polygons"][label] = support_data
 
