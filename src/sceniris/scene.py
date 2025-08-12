@@ -100,6 +100,8 @@ class Scene(_Scene):
         self.valid_env_mask = np.ones((self.num_envs,), dtype=np.bool_)
         self._no_relationship_scene = trimesh.Scene()
         self._plane_asset = None
+        self._curobo_mesh_sphere_cache = {}
+        self.CUROBO_SPHERE_APPROX_N = 200
 
     def collision_check(
         self, 
@@ -197,15 +199,16 @@ class Scene(_Scene):
         N_SPH_BASE = 200
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
-            fn = node_name.replace("object/", f"{query_obj_id}___") # triple _ to seperate obj_id and node_name
-            mesh_file_path = os.path.join(default_mesh_folder, f"{fn}.stl")
-            query_mesh = Mesh(
-                name=node_name,
-                pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                file_path=mesh_file_path,
-            )
+            fn = node_name.replace("object/", f"{query_obj_id}/") # triple _ to seperate obj_id and node_name
+            # mesh_file_path = os.path.join(default_mesh_folder, f"{fn}.stl")
+            # query_mesh = Mesh(
+            #     name=node_name,
+            #     pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            #     file_path=mesh_file_path,
+            # )
+            query_sph_approx = self._curobo_mesh_sphere_cache[query_obj_id][fn]
 
-            mesh_height = mesh.bounds[1, 2] - mesh.bounds[0, 2]
+            # mesh_height = mesh.bounds[1, 2] - mesh.bounds[0, 2]
             # mesh is in original frame
             # the origin is reflected in transform in the scene graph (local_T below)
             local_T = scene_graph_transform_get(
@@ -217,7 +220,7 @@ class Scene(_Scene):
             local_T = query_obj_pose @ local_T # (N, 4, 4) because query_obj_pose is (N, 4, 4)
 
             n_sph = N_SPH_BASE
-            query_sph_approx = query_mesh.get_bounding_spheres(n_spheres=n_sph)
+            # query_sph_approx = query_mesh.get_bounding_spheres(n_spheres=n_sph)
             n_sph = len(query_sph_approx)
             sph_pos = torch.stack([torch.tensor(s.position, dtype=torch.float32) for s in query_sph_approx], dim=0) # (n_sph, 3)
             # print ("sph_pos z bound", sph_pos[:, 2].min(), sph_pos[:, 2].max())
@@ -897,6 +900,7 @@ class Scene(_Scene):
         env_meshes = [[] for _ in range(self.num_envs)]
         for obj_id, asset in self.assets.items():
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
+            self._curobo_mesh_sphere_cache[obj_id] = {}
             for mesh_path in asset_mesh_paths:
                 mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/").replace("object/", f"{obj_id}/")
                 mesh = Mesh(
@@ -904,6 +908,7 @@ class Scene(_Scene):
                     file_path=mesh_path,
                     pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
                 )
+                self._curobo_mesh_sphere_cache[obj_id][mesh_node_name] = mesh.get_bounding_spheres(n_spheres=self.CUROBO_SPHERE_APPROX_N)
                 for env_id in range(self.num_envs):
                     env_meshes[env_id].append(mesh)
                 self._all_mesh_names[obj_id].append(mesh_node_name)
