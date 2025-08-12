@@ -174,6 +174,8 @@ class Scene(_Scene):
             )
             world_ccheck = WorldMeshCollision(world_coll_config)
 
+        start_perf_counter_prepare_query_obj = time.perf_counter()
+
         # prepare query object
         if len(query_obj_T.shape) == 2:
             query_obj_T = np.tile(query_obj_T, (len(env_ids), 1, 1))
@@ -243,6 +245,11 @@ class Scene(_Scene):
         # stack all parts' spheres
         mesh_spheres = torch.cat(mesh_spheres, dim=2) # (N, horizon, n_sph * n_parts, 4)
 
+        end_perf_counter_prepare_query_obj = time.perf_counter()
+        print(f"Prepare query mesh curobo: {end_perf_counter_prepare_query_obj - start_perf_counter_prepare_query_obj:.4f}")
+
+
+        start_perf_counter_query_curobo = time.perf_counter()
         # query curobo
         collision_query_buffer = CollisionQueryBuffer.initialize_from_shape(
             mesh_spheres.shape, tensor_args, world_ccheck.collision_types
@@ -256,6 +263,8 @@ class Scene(_Scene):
         d = world_ccheck.get_sphere_distance(
             mesh_spheres, collision_query_buffer, weight, act_distance, env_query_idx=env_query_idx
         )
+        end_perf_counter_query_curobo = time.perf_counter()
+        print(f"Query curobo: {end_perf_counter_query_curobo - start_perf_counter_query_curobo:.4f}")
         # for i in range(d.size(0)):
         #     colliding_mesh = mesh_spheres[i, 0, torch.nonzero(d[i, 0] > 0).flatten(), :3].cpu().numpy() #(n_colliding, 3)
         #     visualize_mesh(colliding_mesh, mesh_spheres[i, 0, :, :3].cpu().numpy())
@@ -330,6 +339,7 @@ class Scene(_Scene):
             if parent_id is None:
                 parent_id = "world"
 
+            start_perf_counter_joint = time.perf_counter()
             joint_ids = []
             joint_value_ranges = []
             # is joint_states is None, the object will use default joint states
@@ -350,11 +360,15 @@ class Scene(_Scene):
                     for jid in joint_ids
                 }
             # joint_value_ranges = np.concatenate(joint_value_ranges, axis=0) # (num_joints, 2)
+            end_perf_counter_joint = time.perf_counter()
+            print(f"Prepare joint limits: {end_perf_counter_joint - start_perf_counter_joint:.4f}")
 
+            start_perf_counter_iter = time.perf_counter()
             iter = 0
             env_ids: torch.Tensor = torch.arange(self.num_envs, dtype=torch.int32)
             edge_key = (parent_id, obj_id)
             while iter < max_iter:
+                start_perf_counter_iter_sampling = time.perf_counter()
                 n_working_envs = len(env_ids)
                 if "fixed_world_positions" in kwargs:
                     #TODO: <jshang> handle fixed_world_positions
@@ -410,7 +424,7 @@ class Scene(_Scene):
                 else:
                     pos = pos_raw
                     support = position_iterator.support
-
+                
                 logger.debug(f"support, {support}")
 
                 # To avoid collisions with the support surface
@@ -419,6 +433,11 @@ class Scene(_Scene):
 
                 logger.debug(f"{obj_id} sampled pos, {pos3d}")
 
+                end_perf_counter_iter_sampling = time.perf_counter()
+                print(f"Iter sampling: {end_perf_counter_iter_sampling - start_perf_counter_iter_sampling:.4f}")
+
+
+                start_perf_counter_iter_transform = time.perf_counter()
                 # Transform plane coordinates into scene coordinates
                 if isinstance(support, np.ndarray):
                     # transform 3D coordinate with respect to the normalized surface to mesh frame
@@ -459,6 +478,11 @@ class Scene(_Scene):
                 world_T = world_to_parent @ placement_T # T_w_obj
                 logger.debug(f"world T, {world_T[..., :3, 3]}")
 
+                end_perf_counter_iter_transform = time.perf_counter()
+                print(f"Compute world transform: {end_perf_counter_iter_transform - start_perf_counter_iter_transform:.4f}")
+
+
+                start_perf_counter_joint_update = time.perf_counter()
                 joint_values = []
                 if joint_states is not None and len(joint_states) > 0:
                     for joint_group_idx, js in enumerate(joint_states):
@@ -481,13 +505,20 @@ class Scene(_Scene):
                     for joint_idx, jid in enumerate(joint_ids):
                         self.joint_states[obj_id][jid][working_env_ids] = joint_values[:, joint_idx]
 
+                end_perf_counter_joint_update = time.perf_counter()
+                print(f"Update joint states: {end_perf_counter_joint_update - start_perf_counter_joint_update:.4f}")
+
                 # Check custom validity function
                 # disable for now
 
                 # Check collisions
+                start_perf_counter_collision_check = time.perf_counter()
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
                 logger.debug(f"placing {obj_id} has collision, {has_collision.sum().item()}")
+                end_perf_counter_collision_check = time.perf_counter()
+                print(f"Collision check: {end_perf_counter_collision_check - start_perf_counter_collision_check:.4f}")
 
+                start_perf_counter_update_info = time.perf_counter()
                 retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
                     retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
@@ -503,6 +534,9 @@ class Scene(_Scene):
                     self.edge_batch[edge_key] = placement_T
                 self.edge_batch[edge_key].flags["WRITEABLE"] = False
 
+                end_perf_counter_update_info = time.perf_counter()
+                print(f"Update info: {end_perf_counter_update_info - start_perf_counter_update_info:.4f}")
+
                 env_ids = retry_env_ids
                 if len(env_ids) == 0:
                     logger.debug(f"{obj_id} succesfully placed")
@@ -515,6 +549,9 @@ class Scene(_Scene):
                 return env_ids.numpy() # return invalid env_ids
 
             logger.debug(f"Adding {obj_id} to {parent_id}")
+
+            end_perf_counter_iter = time.perf_counter()
+            print(f"Place objects iter: {end_perf_counter_iter - start_perf_counter_iter:.4f}")
             
             # use env0 transform to update trimesh scene
             trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
@@ -541,7 +578,11 @@ class Scene(_Scene):
             # update collision check things
             self._object_enabled[obj_id] = True
             # st = time.time()
+
+            start_perf_counter_update_curobo = time.perf_counter()
             self._update_curobo_world_ccheck(update_transforms=True, update_enabled=True, update_obj_ids=[obj_id])
+            end_perf_counter_update_curobo = time.perf_counter()
+            print(f"Update collision checker: {end_perf_counter_update_curobo - start_perf_counter_update_curobo:.4f}")
             # print (f"update curobo world ccheck taken: {time.time() - st:.4f}s")
 
         return env_ids.numpy()
@@ -723,13 +764,31 @@ class Scene(_Scene):
             cfg[k] = v
         
         # create scene instance from cfg
+        start_perf_counter = time.perf_counter()
         scene = cls.init_from_env_cfg(cfg)
+        end_perf_counter = time.perf_counter()
+        print(f"Creat scene class: {end_perf_counter - start_perf_counter:.4f}")
 
         # initialize assets, gen tree, trimesh scene, and collision checker
+        start_perf_counter = time.perf_counter()
         scene._load_assets()
+        end_perf_counter = time.perf_counter()
+        print(f"Load assets: {end_perf_counter - start_perf_counter:.4f}")
+
+        start_perf_counter = time.perf_counter()
         scene._build_gen_tree()
+        end_perf_counter = time.perf_counter()
+        print(f"Build gen tree: {end_perf_counter - start_perf_counter:.4f}")
+
+        start_perf_counter = time.perf_counter()
         scene._init_trimesh_scene()
+        end_perf_counter = time.perf_counter()
+        print(f"Init trimesh scene: {end_perf_counter - start_perf_counter:.4f}")
+
+        start_perf_counter = time.perf_counter()
         scene._init_collision_checker()
+        end_perf_counter = time.perf_counter()
+        print(f"Init collision checker: {end_perf_counter - start_perf_counter:.4f}")
 
         return scene
 
@@ -912,6 +971,7 @@ class Scene(_Scene):
         Execute generation tree. The generated env instances will be stored in the attributes of this class instance.
         Use `export_scene_to_poses_and_joint_states` to get the poses, joint states, and the valid env mask.
         """
+        start_perf_counter_gen = time.perf_counter()
         # reset valid env mask
         self.valid_env_mask[:] = True
         # reset enabled objects in collision checker
@@ -922,10 +982,14 @@ class Scene(_Scene):
         # traverse the generation tree
         for obj_id in self._gen_node_order:
             # TODO: handle sub traversal maybe
+            start_perf_counter_obj = time.perf_counter()
             object_cfg = self._cfg["objects"][obj_id]
             placement_args = self._parse_obj_placement_cfg(object_cfg) 
+            end_perf_counter_obj = time.perf_counter()
+            print(f"Parse obj placement cfg {obj_id}: {end_perf_counter_obj - start_perf_counter_obj:.4f}")
             # placement_args: obj_position_iterator, obj_orientation_iterator, constraint, support_id, erosion_distance
 
+            start_perf_counter_place = time.perf_counter()
             invalid_env_ids = self.place_object(
                 obj_id=obj_id,
                 obj_asset=self.assets[obj_id],
@@ -933,6 +997,11 @@ class Scene(_Scene):
                 **placement_args,
             )
             self.valid_env_mask[invalid_env_ids] = False
+            end_perf_counter_place = time.perf_counter()
+            print(f"Place object {obj_id}: {end_perf_counter_place - start_perf_counter_place:.4f}")
+        
+        end_perf_counter_gen = time.perf_counter()
+        print(f"Gen scenes: {end_perf_counter_gen - start_perf_counter_gen:.4f}")
 
     def export_scene_to_poses_and_joint_states(
         self, 
