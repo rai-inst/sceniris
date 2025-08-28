@@ -520,28 +520,18 @@ class Scene(_Scene):
                         
                         # Using new orientation threshold method - no need for manual theta generation
                         
-                        # Use batch reachability checking with new orientation threshold method
+                        # Use vectorized batch reachability checking for maximum performance
                         if len(world_T_np.shape) == 3 and len(world_T_np) > 1:
-                            # Batch check all poses using the new orientation threshold method
-                            reachable_mask = np.zeros(len(world_T_np), dtype=bool)
+                            # Extract all positions for batch processing
                             positions = world_T_np[:, :3, 3]
-                            distances = np.sqrt(np.sum(positions**2, axis=1))
                             
-                            for i, pose in enumerate(world_T_np):
-                                position = pose[:3, 3]
-                                # print('position', position)
-                                # exit()
-                                try:
-                                    # Use the new orientation threshold method (10% of orientations must be reachable)
-                                    reachable_with_any_orientation = self._reachability_checker.reachability_map.is_position_reachable_with_orientation_threshold(
-                                        position, threshold=0.1)
-                                except (IndexError, ValueError):
-                                    # Position is outside the map bounds
-                                    reachable_with_any_orientation = False
-                                
-                                reachable_mask[i] = reachable_with_any_orientation
-                                
-                               
+                            try:
+                                # Use the fully vectorized batch method (10% of orientations must be reachable)
+                                reachable_mask = self._reachability_checker.reachability_map.are_positions_reachable_with_orientation_threshold(
+                                    positions, threshold=0.1)
+                            except (IndexError, ValueError):
+                                # Handle case where some/all positions are outside map bounds
+                                reachable_mask = np.zeros(len(positions), dtype=bool)
                         
                         # Convert to tensor and set unreachable poses
                         has_reachability_issue = torch.from_numpy(~reachable_mask).to(has_collision.device)
