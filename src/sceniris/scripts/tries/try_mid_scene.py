@@ -6,8 +6,8 @@ import time
 from multiprocessing import Pool
 import psutil
 
-from utils import scene_graph_transform_get
-from constraints import SurfaceRelation, TrackingTransform
+
+from sceniris.constraints import SurfaceRelation, TrackingTransform
 
 parser = ArgumentParser()
 parser.add_argument("--use_original_ss", action="store_true")
@@ -102,37 +102,36 @@ def generate_scene(i):
     # my_scene.show_supports()
     # exit()
 
-    drawer_transform = scene_graph_transform_get(my_scene._scene.graph, "drawer", edge_batch=my_scene.edge_batch, cache=my_scene.cache)[0]
-
     build_constraint_st = time.time()
     constraint = SurfaceRelation(
-        scene = my_scene,
-        anchor_transforms = [TrackingTransform(parent_id="drawer", transform=drawer_transform)],
-        base_support = my_scene._scene.metadata["support_polygons"]["plane_support"],
-        distance_type = "greater",
-        distance = 0.1,
+        scene=my_scene,
+        anchor_transforms=[TrackingTransform(parent_id="drawer")],
+        base_support=my_scene._scene.metadata[
+            "support_polygons"]["plane_support"],
+        distance_type="greater",
+        distance=0.1,
         # direction = np.array([1.0, 1.0]),
-        max_mesh_projection_z = 0.1,
-        distance_start_bbox = False,
+        max_mesh_projection_z=0.1,
+        distance_start_bbox=False,
     )
-    print (f"build constraint {time.time() - build_constraint_st}")
+    print(f"build constraint {time.time() - build_constraint_st}")
 
     my_scene.place_object(
         obj_asset=banana,
         obj_id="banana",
         support_id="plane_support",
         parent_id="plane",
-        constraint = constraint
+        constraint=constraint
         # joint_type="fixed",
     )
 
 
-    banana_transform = scene_graph_transform_get(my_scene._scene.graph, "banana", edge_batch=my_scene.edge_batch, cache=my_scene.cache)[0]
+
     constraint_2 = SurfaceRelation(
         scene = my_scene,
         anchor_transforms = [
-            TrackingTransform(parent_id="drawer", transform=drawer_transform), 
-            TrackingTransform(parent_id="banana", transform=banana_transform)
+            TrackingTransform(parent_id="drawer"), 
+            TrackingTransform(parent_id="banana")
         ],
         base_support = my_scene._scene.metadata["support_polygons"]["plane_support"],
         direction = "middle",
