@@ -1,6 +1,6 @@
 from typing import Any
 
-
+import itertools
 import os
 import re
 import time
@@ -40,7 +40,8 @@ from sceniris.pose_generators import (
     OrientationGeneratorStablePoses,
     OrientationGeneratorUniformAroundZ,
     PositionIteratorNone,
-    PositionIteratorUniform,
+    PositionIteratorUniform, 
+    PositionIterator2DCollection,
 )
 from sceniris.utils import (
     point_to_translation_matrix,
@@ -293,7 +294,6 @@ class Scene(_Scene):
         constraints = [],
         joint_states = None,
         check_reachability=False,
-        print_reachability_info=False,
         **kwargs,
     ):
         """
@@ -316,6 +316,7 @@ class Scene(_Scene):
                 None has a similar effect as "fixed". Defaults to "floating".
             valid_placement_fn (function, optional): Not used.
             debug (bool, optional): Not used.
+            check_reachability (bool, optional): Whether to check reachability of the object. Defaults to False.
 
             **use_collision_geometry (bool, optional): Defaults to default_use_collision_geometry.
             **kwargs: Keyword arguments that will be delegated to add_object.
@@ -324,7 +325,7 @@ class Scene(_Scene):
             ndarray: env ids wher objects are **not** successfully placed.
         """
         use_collision_geometry = kwargs.pop('use_collision_geometry', self._default_use_collision_geometry)
-        for obj_id, obj_asset in zip(obj_id_iterator, obj_asset_iterator):
+        for obj_id, obj_asset, in zip(obj_id_iterator, obj_asset_iterator):
             if isinstance(obj_position_iterator, dict):
                 position_iterator = obj_position_iterator[obj_id]
             else:
@@ -504,12 +505,6 @@ class Scene(_Scene):
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
                 logger.debug(f"placing {obj_id} has collision, {has_collision.sum().item()}")
 
-                retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
-                if len(failed_env_ids) > 0:
-                    retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
-                # Check reachability using OPTIMAL RM4D discretization
-                # Tests exactly 36 angles (one per RM4D theta bin) for COMPLETE coverage
-                # This ensures we hit every discrete orientation category RM4D recognizes
                 has_reachability_issue = torch.zeros_like(has_collision, dtype=torch.bool)
                 if check_reachability:
                     # Initialize reachability checker if needed
@@ -537,7 +532,7 @@ class Scene(_Scene):
                                 # print('position', position)
                                 # exit()
                                 try:
-                                    # Use the new orientation threshold method (50% of orientations must be reachable)
+                                    # Use the new orientation threshold method (10% of orientations must be reachable)
                                     reachable_with_any_orientation = self._reachability_checker.reachability_map.is_position_reachable_with_orientation_threshold(
                                         position, threshold=0.1)
                                 except (IndexError, ValueError):
@@ -546,67 +541,188 @@ class Scene(_Scene):
                                 
                                 reachable_mask[i] = reachable_with_any_orientation
                                 
-                                # Print reachability info for reachable poses
-                                if reachable_with_any_orientation and print_reachability_info:
-                                    x, y, z = position
-                                    distance = distances[i]
-                                    orientation_msg = f" (orientation: {working_orientations[0]})" if working_orientations else ""
-                                    distance_msg = f"Object {obj_id} placed at distance {distance:.3f}m from robot (position: [{x:.3f}, {y:.3f}, {z:.3f}]){orientation_msg}"
-                                    logger.info(distance_msg)
-                                    print(distance_msg)
+                               
                         
                         # Convert to tensor and set unreachable poses
                         has_reachability_issue = torch.from_numpy(~reachable_mask).to(has_collision.device)
-                        
-                    else:
-                        # Single pose: use optimal RM4D discretization
-                        if len(world_T_np.shape) == 3:
-                            # Single pose for all environments
-                            pose = world_T_np[0]
-                        else:
-                            pose = world_T_np
-                            
-                        position = pose[:3, 3]
-                        
-                        try:
-                            # Use the new orientation threshold method (50% of orientations must be reachable)
-                            reachable_with_any_orientation = self._reachability_checker.reachability_map.is_position_reachable_with_orientation_threshold(
-                                position, threshold=0.1)
-                        except (IndexError, ValueError):
-                            # Position is outside the map bounds
-                            reachable_with_any_orientation = False
-                        
-                        # Calculate distance to robot (robot is at origin)
-                        x, y, z = position
-                        distance_to_robot = np.sqrt(x**2 + y**2 + z**2)
-                        
-                        if reachable_with_any_orientation and print_reachability_info:
-                            distance_msg = f"Object {obj_id} placed at distance {distance_to_robot:.3f}m from robot (position: [{x:.3f}, {y:.3f}, {z:.3f}]) (>50% orientations reachable)"
-                            logger.info(distance_msg)
-                            print(distance_msg)
-                        
-                        if not reachable_with_any_orientation:
-                            has_reachability_issue[:] = True
-                    
-                    logger.debug(f"placing {obj_id} has reachability issue, {has_reachability_issue.sum().item()}")
 
-                    # Combine collision and reachability issues
-                    retry_env_ids_reachability = working_env_ids[(has_reachability_issue==True).nonzero().flatten().cpu()]
-                    retry_env_ids = torch.cat([retry_env_ids, retry_env_ids_reachability])
-                    retry_env_ids = torch.unique(retry_env_ids)  # Remove duplicates
+                retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
+                # Combine collision and reachability issues
+                retry_env_ids_reachability = working_env_ids[(has_reachability_issue==True).nonzero().flatten().cpu()]
+                retry_env_ids = torch.cat([retry_env_ids, retry_env_ids_reachability])
+                retry_env_ids = torch.unique(retry_env_ids) 
+                if len(failed_env_ids) > 0:
+                    retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
                 
-                # Update env_ids for next iteration
+                if edge_key not in self.edge_batch:
+                    self.edge_batch[edge_key] = np.eye(4)
+                self.edge_batch[edge_key].flags["WRITEABLE"] = True
+                if len(placement_T.shape) == 3:
+                    if len(self.edge_batch[edge_key].shape) == 2:
+                        self.edge_batch[edge_key] = np.tile(self.edge_batch[edge_key], (self.num_envs, 1, 1))
+                    self.edge_batch[edge_key][working_env_ids] = placement_T
+                else:
+                    self.edge_batch[edge_key] = placement_T
+                self.edge_batch[edge_key].flags["WRITEABLE"] = False
+
                 env_ids = retry_env_ids
-                
-                # If no environments need retry, break the loop
                 if len(env_ids) == 0:
+                    logger.debug(f"{obj_id} succesfully placed")
                     break
-                    
-                # Increment iteration counter
+                logger.debug(f"{len(env_ids)} envs have collision, retrying")
                 iter += 1
+            
+            if len(env_ids) > 0:
+                logger.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
+                return env_ids.numpy() # return invalid env_ids
+
+            logger.debug(f"Adding {obj_id} to {parent_id}")
+            
+            # use env0 transform to update trimesh scene
+            trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
+            if obj_id in self._scene.metadata["object_nodes"]:
+                pass # skip modifing trimesh scene
+                # self._scene.graph.transforms.edge_data[edge_key].update(matrix=trimesh_transform)
+            else:
+                self.add_object(
+                    obj_id=obj_id,
+                    asset=obj_asset,
+                    parent_id=parent_id,
+                    use_collision_geometry=use_collision_geometry,
+                    transform=trimesh_transform,
+                    joint_type=joint_type,
+                    **kwargs,
+                )
+
+            invalidate_scenegraph_cache(self)
+
+            if obj_id not in self.assets:
+                self.assets[obj_id] = obj_asset
+                self._asset_mesh_cache[obj_id] = make_mesh_buffer(obj_id, obj_asset)
+            
+            # update collision check things
+            self._object_enabled[obj_id] = True
+            # st = time.time()
+            self._update_curobo_world_ccheck(update_transforms=True, update_enabled=True, update_obj_ids=[obj_id])
+            # print (f"update curobo world ccheck taken: {time.time() - st:.4f}s")
+
+        return env_ids.numpy()
+    
+    def place_object(
+        self,
+        obj_id,
+        obj_asset,
+        support_id=None,
+        parent_id=None,
+        obj_position_iterator=None,
+        obj_orientation_iterator=None,
+        max_iter=10,
+        distance_above_support=0.005,
+        joint_type="floating",
+        valid_placement_fn=lambda obj_asset, support, placement_T: True,
+        constraint = None,
+        joint_states = None,
+        obj_position_iterator_xy_limit = None,
+        erosion_distance: float = 0.02,
+        **kwargs,
+    ):
+        """Add object by placing it in a non-colliding pose on top of a support surface or inside a container.
+
+        Args:
+            obj_id (str): Name of the object to place.
+            obj_asset (scene.Asset): The asset that represents the object to be placed.
+            support_id (str, optional): Defines the support that will be used for placing. Defaults to None. Will be ignored if obj_position_iterator is provided.
+            parent_id (str): Name of the object in the scene on which to place the object. Or None if any support surface works. Defaults to None.
+            obj_position_iterator (iterator, optional): Iterator for sampling object positions in the support frame. Defaults to PositionIteratorUniform.
+            obj_orientation_iterator (iterator, optional): Iterator for sampling object orientation in the object asset frame. Defaults to utils.orientation_generator_uniform_around_z.
+            max_iter (int, optional): Maximum number of attempts to find a placement pose. Defaults to 100.
+            distance_above_support (float, optional): Distance the object mesh will be placed above the support surface. Defaults to 0.0.
+            joint_type (str, optional): The type of joint that will be used to connect this object to the scene ("floating" or "fixed"). None has a similar effect as "fixed". Defaults to "floating".
+            valid_placement_fn (function, optional): Function for testing valid placements. Defaults to returning True.
+            **use_collision_geometry (bool, optional): Defaults to default_use_collision_geometry.
+            **kwargs: Keyword arguments that will be delegated to add_object.
+
+        Raises:
+            RuntimeError: In case the support_id does not exist.
+
+        Returns:
+            bool: Success.
+        """
+        if obj_orientation_iterator is None:
+            obj_orientation_iterator = OrientationGeneratorUniformAroundZ(
+                seed=self._rng, replenish_size=self.num_envs*2)
+
+        env_obj_position_iterator = None
+        if obj_position_iterator is None:
+            if support_id is not None:
+                if support_id not in self._scene.metadata["support_polygons"]:
+                    raise RuntimeError(f"Support id '{support_id}' does not exist.")
+                if constraint is not None:
+                    env_obj_position_iterator = []
+                    scene_support = constraint.scene_supports
+                    for env_idx in range(self.num_envs):
+                        logger.debug(f"number of supports for env {env_idx}, {len(scene_support[env_idx])}")
+                        if len(scene_support[env_idx]) == 0:
+                            env_obj_position_iterator.append(
+                                PositionIteratorNone(seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit)
+                            )
+                        elif len(scene_support[env_idx]) == 1:
+                            env_obj_position_iterator.append(
+                                PositionIteratorUniform(
+                                    seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit,
+                                    erosion_distance=erosion_distance
+                                )(scene_support[env_idx][0])
+                            )
+                        else:
+                            env_obj_position_iterator.append(
+                                PositionIterator2DCollection(
+                                    position_iterators=[
+                                        PositionIteratorUniform(
+                                            seed=self._rng, replenish_size=4, xy_limit=obj_position_iterator_xy_limit,
+                                            erosion_distance=erosion_distance
+                                        )(s) \
+                                            for s in scene_support[env_idx]
+                                    ],
+                                    replenish_size=4,
+                                )
+                            )
+                    obj_position_iterators = [env_obj_position_iterator[0]]
+                else:
+                    logger.debug(f'support polygon counts {support_id}, {len(self._scene.metadata["support_polygons"][support_id])}')
+                    obj_position_iterators = [
+                        PositionIteratorUniform(
+                            seed=self._rng, replenish_size=self.num_envs*2, 
+                            xy_limit=obj_position_iterator_xy_limit,
+                            erosion_distance=erosion_distance
+                            )(s) \
+                            for s in self._scene.metadata["support_polygons"][support_id]
+                    ]
                 
-            # Return invalid env_ids (those that still need placement after max_iter)
-            return env_ids.cpu().numpy()
+                if len(obj_position_iterators) == 1:
+                    obj_position_iterator = obj_position_iterators[0]
+                else:
+                    obj_position_iterator = PositionIterator2DCollection(
+                        position_iterators=obj_position_iterators,
+                        replenish_size=self.num_envs*2,
+                    )
+            else:
+                raise ValueError("Please pass in either support_id or obj_position_iterator")
+
+        return self.place_objects(
+            obj_id_iterator=itertools.repeat(obj_id, 1),
+            obj_asset_iterator=itertools.repeat(obj_asset, 1),
+            obj_position_iterator=obj_position_iterator,
+            env_obj_position_iterator=env_obj_position_iterator,
+            obj_orientation_iterator=obj_orientation_iterator,
+            parent_id=parent_id,
+            max_iter=max_iter,
+            distance_above_support=distance_above_support,
+            joint_type=joint_type,
+            valid_placement_fn=valid_placement_fn,
+            constraints=[constraint],
+            joint_states=joint_states,
+            **kwargs,
+        )
 
     def update_configuration(self, configuration: NDArray, obj_id=None, joint_ids=None, env_ids=None):
         """Set configuration of articulated objects, indiviual joints, or for the entire scene at once.
@@ -1122,10 +1238,7 @@ class Scene(_Scene):
         else:
             placement_args["constraint"] = None
         
-        # reachability configuration
         placement_args["check_reachability"] = obj_cfg.get("reachable", False)
-        placement_args["print_reachability_info"] = obj_cfg.get("print_reachability_info", False)
-        
         return placement_args
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
@@ -1539,94 +1652,3 @@ class Scene(_Scene):
             trimesh.Scene([mesh, surface_path, ray_path]).show()
 
         return origins, intersections
-
-    def place_object(
-        self,
-        obj_id,
-        obj_asset,
-        obj_position_iterator=None,
-        obj_orientation_iterator=None,
-        parent_id=None,
-        constraint=None,
-        support_id=None,
-        erosion_distance=0.02,
-        obj_position_iterator_xy_limit=None,
-        joint_states=None,
-        **kwargs
-    ):
-        """
-        Place a single object by creating the necessary iterators and calling place_objects.
-        This method serves as a wrapper around place_objects for single object placement.
-
-        Args:
-            obj_id (str): Object identifier
-            obj_asset: Object asset to place
-            obj_position_iterator: Position iterator for the object
-            obj_orientation_iterator: Orientation iterator for the object
-            parent_id (str): Parent object ID
-            constraint: Placement constraints
-            support_id (str): Support surface ID
-            erosion_distance (float): Erosion distance for support surface
-            obj_position_iterator_xy_limit: XY limits for position iterator
-            joint_states: Joint states configuration
-            **kwargs: Additional arguments
-
-        Returns:
-            ndarray: env ids where objects are NOT successfully placed.
-        """
-        
-        # Create single-item iterators
-        obj_id_iterator = [obj_id]
-        obj_asset_iterator = [obj_asset]
-        
-        # Create position iterator if not provided
-        if obj_position_iterator is None:
-            if support_id is not None and support_id in self._scene.metadata["support_polygons"]:
-                support_data = self._scene.metadata["support_polygons"][support_id]
-                # Use the first support surface from the list
-                if isinstance(support_data, list) and len(support_data) > 0:
-                    support_surface = support_data[0]
-                else:
-                    support_surface = support_data
-                    
-                obj_position_iterator = PositionIteratorUniform(
-                    xy_limit=obj_position_iterator_xy_limit,
-                    erosion_distance=erosion_distance,
-                    replenish_size=self.num_envs * 2
-                )(support_surface)
-            else:
-                # Create a default position iterator with no support
-                obj_position_iterator = PositionIteratorUniform(
-                    xy_limit=obj_position_iterator_xy_limit,
-                    erosion_distance=erosion_distance,
-                    replenish_size=self.num_envs * 2
-                )
-        
-        # Create orientation iterator if not provided
-        if obj_orientation_iterator is None:
-            obj_orientation_iterator = OrientationGeneratorUniformAroundZ(
-                replenish_size=self.num_envs * 2
-            )
-        
-        # Create env_obj_position_iterator (set to None for simple case)
-        env_obj_position_iterator = None
-        
-        # Convert single constraint to list format expected by place_objects
-        constraints_list = []
-        if constraint is not None:
-            if isinstance(constraint, list):
-                constraints_list = constraint
-            else:
-                constraints_list = [constraint]
-        
-        return self.place_objects(
-            obj_id_iterator=obj_id_iterator,
-            obj_asset_iterator=obj_asset_iterator,
-            obj_position_iterator=obj_position_iterator,
-            env_obj_position_iterator=env_obj_position_iterator,
-            obj_orientation_iterator=obj_orientation_iterator,
-            parent_id=parent_id,
-            constraints=constraints_list,
-            joint_states=joint_states,
-            **kwargs
-        )

@@ -58,7 +58,7 @@ mid_cfg = {
         {
             "id": "apple",
             "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/013_apple/textured/textured.usd"),
-            # 'reachable': True,
+            'reachable': True,
             # "position": {
             #     "xy_limit": [[0.2, 0.2], [0.8, 0.8]],  # Use fractions: 10%-90% of support surface
             #     "z_limit": [0.0, 0.5],
