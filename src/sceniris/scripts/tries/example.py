@@ -94,6 +94,7 @@ mid_cfg = {
             "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/011_banana/textured/textured.usd"),
             "parent_id": "drawer/unit_1_upper_drawer", # might need to optimize the part name in trimesh scene
             "relation_to_parent": "top",
+            "reachable": True,
         },
         # {
         #     "id": "banana",
@@ -161,7 +162,10 @@ for i in range(REPEAT):
     f.write(f"{i+1}\t{time_taken:.4f}\t{args.num_envs - int(scene.valid_env_mask.sum())}\n")
 f.close()
 
+# find valid env_ids
+valid_env_ids = np.where(scene.valid_env_mask)[0]
+
 if args.visualize:
     # scene.show_supports()
     # scene.show_graph()
-    scene.show(env_ids=np.arange(4))
+    scene.show(env_ids=valid_env_ids[:4] )
