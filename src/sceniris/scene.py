@@ -898,28 +898,46 @@ class Scene(_Scene):
         """
         tensor_args = TensorDeviceType()
         env_meshes = [[] for _ in range(self.num_envs)]
+        make_mesh_buffer_time = 0.0
+        load_mesh_curobo_time = 0.0
+        make_mesh_approx_time = 0.0
         for obj_id, asset in self.assets.items():
+            start_perf_counter = time.perf_counter()
             asset_mesh_paths = make_mesh_buffer(obj_id, asset)
+            end_perf_counter = time.perf_counter()
+            make_mesh_buffer_time += end_perf_counter - start_perf_counter
             self._curobo_mesh_sphere_cache[obj_id] = {}
             for mesh_path in asset_mesh_paths:
                 mesh_node_name = os.path.basename(mesh_path).replace(".stl", "").replace("___", "/").replace("object/", f"{obj_id}/")
+                start_perf_counter = time.perf_counter()
                 mesh = Mesh(
                     name=mesh_node_name,
                     file_path=mesh_path,
                     pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32) # identity transform
                 )
+                end_perf_counter = time.perf_counter()
+                load_mesh_curobo_time += end_perf_counter - start_perf_counter
+                start_perf_counter = time.perf_counter()
                 self._curobo_mesh_sphere_cache[obj_id][mesh_node_name] = mesh.get_bounding_spheres(n_spheres=self.CUROBO_SPHERE_APPROX_N)
+                end_perf_counter = time.perf_counter()
+                make_mesh_approx_time += end_perf_counter - start_perf_counter
                 for env_id in range(self.num_envs):
                     env_meshes[env_id].append(mesh)
                 self._all_mesh_names[obj_id].append(mesh_node_name)
             self._object_enabled[obj_id] = False # disable all objects
         
+        start_perf_counter = time.perf_counter()
         self._curobo_world_configs = [WorldConfig(mesh=meshes) for meshes in env_meshes]
         self._curobo_world_coll_config = WorldCollisionConfig(
             tensor_args, world_model=self._curobo_world_configs
         )
         self._curobo_world_ccheck = WorldMeshCollision(self._curobo_world_coll_config)
         self._update_curobo_world_ccheck(update_transforms=False)
+        end_perf_counter = time.perf_counter()
+        print(f"Make mesh buffer time: {make_mesh_buffer_time:.4f}")
+        print(f"Load mesh curobo time: {load_mesh_curobo_time:.4f}")
+        print(f"Make mesh approx time: {make_mesh_approx_time:.4f}")
+        print(f"Make cuRobo world configs: {end_perf_counter - start_perf_counter:.4f}")
 
     def _update_curobo_world_ccheck(
         self, 
