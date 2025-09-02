@@ -285,6 +285,27 @@ class Scene(_Scene):
         # gather results by collapsing horizon (dim1) and n_sph*n_parts (dim2)
         return torch.any(d > 0, dim=(1,2)).cpu() # (N,)
 
+    def reachability_check(
+        self,
+        obj_id,
+        world_T,
+        env_ids=None,
+    ):
+        if self._reachability_checker is None:
+            self._init_reachability_checker()
+                    
+        positions = world_T[:, :3, 3]
+        try:
+            # Use the reachability checker's method which automatically chooses GPU/CPU
+            reachable_mask = self._reachability_checker.are_positions_reachable_with_orientation_threshold(
+                positions, threshold=0.1)
+        except (IndexError, ValueError):
+            # Handle case where some/all positions are outside map bounds
+            reachable_mask = np.zeros(len(positions), dtype=bool)
+
+        cannot_reach = ~torch.from_numpy(reachable_mask)
+        return cannot_reach
+
     def place_objects(
         self,
         obj_id_iterator,
@@ -380,7 +401,6 @@ class Scene(_Scene):
             env_ids: torch.Tensor = torch.arange(self.num_envs, dtype=torch.int32)
             edge_key = (parent_id, obj_id)
             
-            # Step 1: Find collision-free placements (fast iteration)
             while iter < max_iter:
                 n_working_envs = len(env_ids)
                 if "fixed_world_positions" in kwargs:
@@ -483,7 +503,7 @@ class Scene(_Scene):
                 else:
                     world_to_parent = np.eye(4)
             
-                world_T = world_to_parent @ placement_T # T_w_obj
+                world_T = world_to_parent @ placement_T # T_w_obj, (len(working_env_ids), 4, 4)
                 logger.debug(f"world T, {world_T[..., :3, 3]}")
 
                 joint_values = []
@@ -514,8 +534,17 @@ class Scene(_Scene):
                 # Check collisions only (fast check)
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
                 logger.debug(f"placing {obj_id} has collision, {has_collision.sum().item()}")
+                if check_reachability:
+                    cannot_reach = self.reachability_check(obj_id, world_T, env_ids=working_env_ids)
+                    logger.debug(f"{cannot_reach.sum().item()} failed reachability check")
+                    print (f"{cannot_reach.sum().item()} failed reachability check")
+                else:
+                    cannot_reach = torch.zeros(len(working_env_ids), dtype=torch.bool)
+                
+                retry_env_ids = working_env_ids[
+                    ((has_collision | cannot_reach) == True).nonzero().flatten().cpu()
+                ]
 
-                retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
                 if len(failed_env_ids) > 0:
                     retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
                 
@@ -536,68 +565,10 @@ class Scene(_Scene):
                     break
                 logger.debug(f"{len(env_ids)} envs have collision, retrying")
                 iter += 1
-            
-            # Step 2: Check reachability for collision-free placements only (expensive but done once)
-            reachability_failed_env_ids = torch.tensor([], dtype=torch.int32)
-            if check_reachability:
-                # Get collision-free environments (those NOT in env_ids)
-                all_env_ids = torch.arange(self.num_envs, dtype=torch.int32)
-                collision_free_env_ids = all_env_ids[~torch.isin(all_env_ids, env_ids)]
-                
-                # Only check reachability if there are collision-free environments
-                if len(collision_free_env_ids) > 0:
-                    # Initialize reachability checker if needed
-                    if self._reachability_checker is None:
-                        self._init_reachability_checker()
-                    
-                    if self._reachability_checker is not None:
-                        # Get transforms for collision-free environments
-                        placement_T_all = self.edge_batch[edge_key]
-                        if len(placement_T_all.shape) == 2:
-                            placement_T_all = np.tile(placement_T_all, (self.num_envs, 1, 1))
-                        
-                        # Get world_to_parent for all environments
-                        if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
-                            world_to_parent_all = scene_graph_transform_get(
-                                self._scene.graph, parent_id, edge_batch=self.edge_batch, cache=self.cache)[0]
-                            if len(world_to_parent_all.shape) == 2:
-                                world_to_parent_all = np.tile(world_to_parent_all, (self.num_envs, 1, 1))
-                        else:
-                            world_to_parent_all = np.tile(np.eye(4), (self.num_envs, 1, 1))
-                        
-                        # Compute final transforms for collision-free environments only
-                        final_world_T = world_to_parent_all[collision_free_env_ids] @ placement_T_all[collision_free_env_ids]
-                        
-                        # Convert to numpy for reachability checking
-                        world_T_np = final_world_T.cpu().numpy() if torch.is_tensor(final_world_T) else final_world_T
-                        
-                        # Extract positions for collision-free environments
-                        positions = world_T_np[:, :3, 3]
-                        # import time
-                        # st = time.time()
-                        try:
-                            # Use the reachability checker's method which automatically chooses GPU/CPU
-                            reachable_mask = self._reachability_checker.are_positions_reachable_with_orientation_threshold(
-                                positions, threshold=0.1)
-                        except (IndexError, ValueError):
-                            # Handle case where some/all positions are outside map bounds
-                            reachable_mask = np.zeros(len(positions), dtype=bool)
-                        
-                        # print(f"are_positions_reachable_with_orientation_threshold taken: {time.time() - st:.4f}s")
-                        
-                        # Find collision-free environments that failed reachability
-                        reachability_failed_env_ids = collision_free_env_ids[~torch.from_numpy(reachable_mask)]
-                        if len(reachability_failed_env_ids) > 0:
-                            logger.debug(f"{len(reachability_failed_env_ids)} collision-free envs failed reachability check")
 
-            # Combine collision and reachability failures
-            final_failed_env_ids = torch.cat([env_ids, reachability_failed_env_ids]) if len(reachability_failed_env_ids) > 0 else env_ids
-            final_failed_env_ids = torch.unique(final_failed_env_ids)
-            
-            if len(final_failed_env_ids) > 0:
-                logger.debug(f"after {iter} iterations, {len(final_failed_env_ids)} envs are not valid (collision: {len(env_ids)}, reachability: {len(reachability_failed_env_ids)})")
-                return final_failed_env_ids.numpy() # return invalid env_ids
-
+            if len(env_ids) > 0:
+                logger.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
+                return env_ids.numpy() # return invalid env_ids
             logger.debug(f"Adding {obj_id} to {parent_id}")
             
             # use env0 transform to update trimesh scene
@@ -1056,6 +1027,9 @@ class Scene(_Scene):
                 This is useful to transform coordinate system to any robot centric view.
             "workspace_limits": list<list<float>>: # [[minx, miny], [maxx, maxy]], will ignore env_size
             "collision_checker_backend": str, # "curobo" or "trimesh"
+            "robot_position": list[float] | list[list[float]], # the position of the robot in the env, in world frame.
+                Used to check reachability. If one position is provided, it will be used as the robot position.
+                If a list of positions is provided, it will work as a bound for robot position.
         }
 
         Args:
@@ -1134,6 +1108,7 @@ class Scene(_Scene):
             }]
             "fixed_world_positions": list[NDArray] | None, # if not None, the object will be placed at one of the provided positions (in world frame),
               ignoring all other conditions. Defaults to None.
+            "reachable": bool, # if True, the object will be checked for reachability. Defaults to False.
         }
 
         Args:

@@ -6,6 +6,14 @@ No PyBullet or simulation dependencies - just pure numpy/torch lookups.
 import numpy as np
 import torch
 from typing import Tuple, Optional
+import os
+
+try:
+    import rm4d
+    rm4d_path = rm4d.__path__[0]
+except ImportError as e:
+    print(f"Warning: Could not import rm4d: {e}")
+    rm4d_path = None
 
 
 class SimpleReachabilityMap:
@@ -146,10 +154,14 @@ class FastReachabilityChecker:
     No PyBullet dependencies.
     """
     
-    def __init__(self, map_path: str = None, use_gpu: bool = True):
+    def __init__(self, map_path: str | None = None, use_gpu: bool = True):
         if map_path is None:
-            map_path = ("rm4d/experiment_scripts/data/"
-                        "rm4d_franka_joint_42_0.05/20000000/rmap.npy")
+            if rm4d_path is None:
+                raise ValueError("rm4d_path is not set")
+            map_path = os.path.join(
+                os.path.dirname(rm4d_path),
+                "experiment_scripts/data/rm4d_franka_joint_42_0.05/20000000/rmap.npy"
+            )
         
         self.reachability_map = SimpleReachabilityMap.from_rm4d_file(
             map_path, use_gpu=use_gpu)
