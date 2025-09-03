@@ -537,7 +537,6 @@ class Scene(_Scene):
                 if check_reachability:
                     cannot_reach = self.reachability_check(obj_id, world_T, env_ids=working_env_ids)
                     logger.debug(f"{cannot_reach.sum().item()} failed reachability check")
-                    print (f"{cannot_reach.sum().item()} failed reachability check")
                 else:
                     cannot_reach = torch.zeros(len(working_env_ids), dtype=torch.bool)
                 
