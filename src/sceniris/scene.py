@@ -102,6 +102,26 @@ class Scene(_Scene):
         self._plane_asset = None
         self._curobo_mesh_sphere_cache = {}
         self.CUROBO_SPHERE_APPROX_N = 200
+        self._reachability_checker = None
+
+    def _init_reachability_checker(self):
+        """Initialize the reachability checker if not already done."""
+        if self._reachability_checker is None:
+            try:
+                from sceniris.simple_reachability_map import FastReachabilityChecker
+                print("Using FAST reachability checker (no PyBullet)")
+                self._reachability_checker = FastReachabilityChecker(use_gpu=True)
+               
+            except Exception as e:
+                print(f"Warning: Could not initialize fast reachability checker: {e}")
+                # Fallback to original implementation
+                try:
+                    from sceniris.reachability_checker import ReachabilityChecker
+                    print("Falling back to original reachability checker")
+                    self._reachability_checker = ReachabilityChecker(use_gpu=True)
+                except Exception as e2:
+                    print(f"Warning: Could not initialize any reachability checker: {e2}")
+                    self._reachability_checker = None
 
     def collision_check(
         self, 
@@ -274,6 +294,27 @@ class Scene(_Scene):
         # gather results by collapsing horizon (dim1) and n_sph*n_parts (dim2)
         return torch.any(d > 0, dim=(1,2)).cpu() # (N,)
 
+    def reachability_check(
+        self,
+        obj_id,
+        world_T,
+        env_ids=None,
+    ):
+        if self._reachability_checker is None:
+            self._init_reachability_checker()
+                    
+        positions = world_T[:, :3, 3]
+        try:
+            # Use the reachability checker's method which automatically chooses GPU/CPU
+            reachable_mask = self._reachability_checker.are_positions_reachable_with_orientation_threshold(
+                positions, threshold=0.1)
+        except (IndexError, ValueError):
+            # Handle case where some/all positions are outside map bounds
+            reachable_mask = np.zeros(len(positions), dtype=bool)
+
+        cannot_reach = ~torch.from_numpy(reachable_mask)
+        return cannot_reach
+
     def place_objects(
         self,
         obj_id_iterator,
@@ -290,6 +331,7 @@ class Scene(_Scene):
         debug=False,
         constraints = [],
         joint_states = None,
+        check_reachability=False,
         **kwargs,
     ):
         """
@@ -312,6 +354,7 @@ class Scene(_Scene):
                 None has a similar effect as "fixed". Defaults to "floating".
             valid_placement_fn (function, optional): Not used.
             debug (bool, optional): Not used.
+            check_reachability (bool, optional): Whether to check reachability of the object. Defaults to False.
 
             **use_collision_geometry (bool, optional): Defaults to default_use_collision_geometry.
             **kwargs: Keyword arguments that will be delegated to add_object.
@@ -370,6 +413,7 @@ class Scene(_Scene):
             iter = 0
             env_ids: torch.Tensor = torch.arange(self.num_envs, dtype=torch.int32)
             edge_key = (parent_id, obj_id)
+            
             while iter < max_iter:
                 start_perf_counter_iter_sampling = time.perf_counter()
                 n_working_envs = len(env_ids)
@@ -478,7 +522,7 @@ class Scene(_Scene):
                 else:
                     world_to_parent = np.eye(4)
             
-                world_T = world_to_parent @ placement_T # T_w_obj
+                world_T = world_to_parent @ placement_T # T_w_obj, (len(working_env_ids), 4, 4)
                 logger.debug(f"world T, {world_T[..., :3, 3]}")
 
                 end_perf_counter_iter_transform = time.perf_counter()
@@ -513,7 +557,7 @@ class Scene(_Scene):
 
                 # Check custom validity function
                 # disable for now
-
+                
                 # Check collisions
                 start_perf_counter_collision_check = time.perf_counter()
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
@@ -521,8 +565,21 @@ class Scene(_Scene):
                 end_perf_counter_collision_check = time.perf_counter()
                 print(f"Collision check: {end_perf_counter_collision_check - start_perf_counter_collision_check:.4f}")
 
+                # Check reachability
+                if check_reachability:
+                    start_perf_counter_reachability_check = time.perf_counter()
+                    cannot_reach = self.reachability_check(obj_id, world_T, env_ids=working_env_ids)
+                    logger.debug(f"{cannot_reach.sum().item()} failed reachability check")
+                    end_perf_counter_reachability_check = time.perf_counter()
+                    print(f"Reachability check: {end_perf_counter_reachability_check - start_perf_counter_reachability_check:.4f}")
+                else:
+                    cannot_reach = torch.zeros(len(working_env_ids), dtype=torch.bool)
+                
                 start_perf_counter_update_info = time.perf_counter()
-                retry_env_ids = working_env_ids[(has_collision==True).nonzero().flatten().cpu()]
+                retry_env_ids = working_env_ids[
+                    ((has_collision | cannot_reach) == True).nonzero().flatten().cpu()
+                ]
+
                 if len(failed_env_ids) > 0:
                     retry_env_ids = torch.cat([retry_env_ids, torch.from_numpy(np.array(failed_env_ids)).to(torch.int32)])
                 
@@ -542,15 +599,14 @@ class Scene(_Scene):
 
                 env_ids = retry_env_ids
                 if len(env_ids) == 0:
-                    logger.debug(f"{obj_id} succesfully placed")
+                    logger.debug(f"{obj_id} collision-free placement found for all envs")
                     break
                 logger.debug(f"{len(env_ids)} envs have collision, retrying")
                 iter += 1
-            
+
             if len(env_ids) > 0:
                 logger.debug(f"after {iter} iterations, {len(env_ids)} envs are not valid")
                 return env_ids.numpy() # return invalid env_ids
-
             logger.debug(f"Adding {obj_id} to {parent_id}")
 
             end_perf_counter_iter = time.perf_counter()
@@ -1062,6 +1118,9 @@ class Scene(_Scene):
                 This is useful to transform coordinate system to any robot centric view.
             "workspace_limits": list<list<float>>: # [[minx, miny], [maxx, maxy]], will ignore env_size
             "collision_checker_backend": str, # "curobo" or "trimesh"
+            "robot_position": list[float] | list[list[float]], # the position of the robot in the env, in world frame.
+                Used to check reachability. If one position is provided, it will be used as the robot position.
+                If a list of positions is provided, it will work as a bound for robot position.
         }
 
         Args:
@@ -1140,6 +1199,7 @@ class Scene(_Scene):
             }]
             "fixed_world_positions": list[NDArray] | None, # if not None, the object will be placed at one of the provided positions (in world frame),
               ignoring all other conditions. Defaults to None.
+            "reachable": bool, # if True, the object will be checked for reachability. Defaults to False.
         }
 
         Args:
@@ -1265,6 +1325,8 @@ class Scene(_Scene):
                 placement_args["constraint"] = c
         else:
             placement_args["constraint"] = None
+        
+        placement_args["check_reachability"] = obj_cfg.get("reachable", False)
         return placement_args
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
