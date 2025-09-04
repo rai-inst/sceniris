@@ -897,8 +897,16 @@ class Scene(_Scene):
         self.assets_extents: dict[str, NDArray] = {}
         for obj_id, obj_cfg in cfg["objects"].items():
             asset_path = obj_cfg["asset_path"]
-            self.assets[obj_id] = Asset(asset_path, origin=("center", "center", "bottom"))
-            asset_mesh = self.assets[obj_id].as_trimesh_scene(use_collision_geometry=True).dump(concatenate=True)
+            try:
+                self.assets[obj_id] = Asset(asset_path, origin=("center", "center", "bottom"))
+            except:
+                raise RuntimeError(f"Failed to load asset id: {obj_id} path: {asset_path}")
+
+            try:
+                asset_mesh = self.assets[obj_id].as_trimesh_scene(use_collision_geometry=True).dump(concatenate=True)
+            except:
+                raise RuntimeError(f"Failed to dump asset mesh id: {obj_id} path: {asset_path}")
+            
             self.assets_extents[obj_id] = asset_mesh.bounding_box_oriented.extents # width, depth, height (x,y,z)
         
 
