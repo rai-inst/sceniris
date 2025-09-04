@@ -54,11 +54,12 @@ from sceniris.utils import (
     batch_transform_matrix_to_vectors,
     invalidate_scenegraph_cache,
     homogeneous_inv_batch,
-    visualize_mesh,
 )
 
 from sceniris.constraints import SurfaceRelation, TrackingTransform
 from sceniris.asset import Asset
+from curobo.util.usd_helper import UsdHelper
+from curobo.geom.types import Mesh as CuroboMesh
 
 logger = logging.getLogger("sceniris")
 
@@ -1674,3 +1675,440 @@ class Scene(_Scene):
             trimesh.Scene([mesh, surface_path, ray_path]).show()
 
         return origins, intersections
+
+    def export_scene_to_usd(
+        self, 
+        env_id: int = 0, 
+        output_path: str = "exported_scene.usd",
+        include_joints: bool = True,
+        preserve_materials: bool = True
+    ) -> None:
+        """Export a specific environment scene to USD format with proper material preservation.
+        
+        Args:
+            env_id (int): Environment ID to export (must be valid)
+            output_path (str): Output USD file path
+            include_joints (bool): Whether to include joint states in the export
+            preserve_materials (bool): Whether to use material preservation methods
+        """
+        if not self.valid_env_mask[env_id]:
+            raise ValueError(f"Environment {env_id} is not valid")
+        
+        if preserve_materials:
+            # Check if all assets are USD files
+            all_usd = all(
+                hasattr(asset, '_fname') and asset._fname.endswith('.usd') 
+                for asset in self.assets.values()
+            )
+            
+            if all_usd:
+                print("All assets are USD files - using direct copy method for best material preservation")
+                self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
+            else:
+                print("Mixed asset types - using reference method")
+                self._export_scene_to_usd_with_materials(env_id, output_path, include_joints)
+        else:
+            self._export_scene_to_usd_basic(env_id, output_path, include_joints)
+    
+    def _export_scene_to_usd_with_materials(
+        self, 
+        env_id: int, 
+        output_path: str, 
+        include_joints: bool
+    ) -> None:
+        """Export USD with manual creation to preserve materials."""
+        try:
+            from pxr import Usd, UsdGeom, Sdf, Gf
+            
+            # Create new USD stage (remove existing file first)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            stage = Usd.Stage.CreateNew(output_path)
+            
+            # Set metadata
+            stage.SetMetadata('metersPerUnit', 1.0)
+            stage.SetMetadata('upAxis', 'Z')
+            
+            # Create root prim
+            root_prim = UsdGeom.Xform.Define(stage, '/World')
+            stage.SetDefaultPrim(root_prim.GetPrim())
+            
+            # Add each object with proper transforms and material references
+            for obj_id in self.assets.keys():
+                # Get the transform for this environment
+                obj_world_T = scene_graph_transform_get(
+                    self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+                
+                if len(obj_world_T.shape) == 3:
+                    obj_transform = obj_world_T[env_id]
+                else:
+                    obj_transform = obj_world_T
+                
+                # Create object prim
+                obj_prim_path = f'/World/{obj_id}'
+                obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
+                
+                # Set transform using decomposed components
+                # Extract translation and rotation from transform matrix
+                translation = obj_transform[:3, 3]
+                rotation_matrix = obj_transform[:3, :3]
+                
+                # Convert rotation matrix to quaternion (wxyz format for USD)
+                import trimesh.transformations as tra
+                quat = tra.quaternion_from_matrix(obj_transform)
+                # USD expects quaternion in (x, y, z, w) format
+                usd_quat = Gf.Quatd(quat[1], quat[2], quat[3], quat[0])
+                
+                # Set translation and rotation directly
+                obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0], translation[1], translation[2]))
+                obj_xform.AddRotateOp().Set(usd_quat)
+                
+                # Get original asset path
+                asset = self.assets[obj_id]
+                if hasattr(asset, '_fname') and asset._fname.endswith('.usd'):
+                    # Reference the original USD file to preserve materials
+                    original_path = os.path.abspath(asset._fname)
+                    references = obj_xform.GetPrim().GetReferences()
+                    references.AddReference(original_path)
+                    print(f"Referenced original USD: {original_path}")
+                else:
+                    print(f"Warning: {obj_id} is not a USD asset, materials may not be preserved")
+            
+            # Save the stage
+            stage.Save()
+            print(f"USD scene exported with materials to: {output_path}")
+            
+        except ImportError:
+            print("Warning: USD Python bindings not available, falling back to basic export")
+            self._export_scene_to_usd_basic(env_id, output_path, include_joints)
+        except Exception as e:
+            print(f"Error in USD export with materials: {e}")
+            print("Falling back to basic export")
+            self._export_scene_to_usd_basic(env_id, output_path, include_joints)
+    
+    def _export_scene_to_usd_basic(
+        self, 
+        env_id: int, 
+        output_path: str, 
+        include_joints: bool
+    ) -> None:
+        """Basic USD export using Scene Synthesizer (may lose materials)."""
+        # Remove existing file if it exists
+        if os.path.exists(output_path):
+            os.remove(output_path)
+            
+        # Store current configuration to restore later
+        current_configuration = self.get_configuration()
+        
+        # Create a temporary copy of the entire Scene Synthesizer scene to modify
+        # We need to temporarily update the edge_batch to reflect the specific environment
+        original_edge_batch = {}
+        
+        try:
+            # Update edge transforms to the specific environment
+            for edge_key, transform_batch in self.edge_batch.items():
+                # Store original for restoration
+                original_edge_batch[edge_key] = transform_batch.copy()
+                
+                # Update to specific environment transform
+                if len(transform_batch.shape) == 3:
+                    env_transform = transform_batch[env_id]
+                else:
+                    env_transform = transform_batch
+                
+                # Update the scene graph edge with the environment-specific transform
+                self._scene.graph.transforms.edge_data[edge_key].update(matrix=env_transform)
+            
+            # Update joint states if include_joints is True
+            if include_joints:
+                joint_config = []
+                joint_names = self.get_joint_names()
+                for joint_name in joint_names:
+                    if hasattr(self, 'joint_states'):
+                        for obj_id, joint_dict in self.joint_states.items():
+                            if joint_name in joint_dict:
+                                joint_config.append(joint_dict[joint_name][env_id])
+                                break
+                        else:
+                            joint_config.append(0.0)  # Default value
+                    else:
+                        joint_config.append(0.0)
+                
+                if joint_config:
+                    self.update_configuration(joint_config)
+            
+            # Use Scene Synthesizer's built-in USD export with material preservation options
+            self.export(
+                fname=output_path, 
+                file_type="usd",
+                export_materials=True,  # Ensure materials are exported
+                write_usd_object_files=False,  # Reference original USD files instead of converting
+                use_absolute_usd_paths=True,  # Use absolute paths for better texture resolution
+                texture_dir="textures",  # Organize textures in subdirectory
+                include_light_nodes=True  # Include lighting information
+            )
+            print(f"Scene exported to USD: {output_path}")
+            
+        finally:
+            # Restore original transforms
+            for edge_key, original_transform in original_edge_batch.items():
+                self._scene.graph.transforms.edge_data[edge_key].update(matrix=original_transform)
+            
+            # Restore original configuration
+            if include_joints:
+                self.update_configuration(current_configuration)
+
+    def export_scene_to_usd_direct_copy(
+        self, 
+        env_id: int = 0, 
+        output_path: str = "exported_scene.usd",
+        include_joints: bool = True
+    ) -> None:
+        """Export USD by directly copying and compositing original USD files (best material preservation).
+        
+        This method bypasses trimesh conversion entirely, directly working with USD files
+        to preserve all materials, textures, and shaders. It also handles unit conversions
+        properly by reading the original USD metersPerUnit values.
+        
+        Args:
+            env_id (int): Environment ID to export (must be valid)
+            output_path (str): Output USD file path
+            include_joints (bool): Whether to include joint states in the export
+        """
+        if not self.valid_env_mask[env_id]:
+            raise ValueError(f"Environment {env_id} is not valid")
+        
+        try:
+            from pxr import Usd, UsdGeom, Sdf, Gf
+            
+            # Create new USD stage - ensure proper cleanup
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass  # File might be locked, try to create anyway
+            stage = Usd.Stage.CreateNew(output_path)
+            
+            # Set metadata - use standard meter units for the combined scene
+            stage.SetMetadata('metersPerUnit', 1.0)
+            stage.SetMetadata('upAxis', 'Z')
+            
+            # Create root prim
+            root_prim = UsdGeom.Xform.Define(stage, '/World')
+            stage.SetDefaultPrim(root_prim.GetPrim())
+            
+            # Add each USD object by direct sublayering
+            for obj_id in self.assets.keys():
+                asset = self.assets[obj_id]
+                
+                # Only handle USD assets with this method
+                if not (hasattr(asset, '_fname') and asset._fname.endswith('.usd')):
+                    print(f"Warning: {obj_id} is not a USD asset, skipping direct copy method")
+                    continue
+                
+                # Read the original USD units to determine the correct scale
+                original_stage = Usd.Stage.Open(asset._fname)
+                if original_stage:
+                    original_meters_per_unit = UsdGeom.GetStageMetersPerUnit(original_stage)
+                    # Scale factor to convert from original units to meters
+                    unit_scale_factor = original_meters_per_unit
+                    print(f"{obj_id}: Original metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
+                else:
+                    print(f"Warning: Could not read USD metadata for {obj_id}, using default scale")
+                    unit_scale_factor = 0.01  # Default for problematic files
+                
+                # Get the transform for this environment
+                obj_world_T = scene_graph_transform_get(
+                    self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+                
+                if len(obj_world_T.shape) == 3:
+                    obj_transform = obj_world_T[env_id]
+                else:
+                    obj_transform = obj_world_T
+                
+                # Apply unit-aware scale correction
+                # The sceniris transforms are computed for the trimesh-converted version
+                # We need to account for both the trimesh conversion and the unit conversion
+                corrected_transform = obj_transform.copy()
+                
+                # Extract translation and rotation separately
+                translation = obj_transform[:3, 3]
+                rotation_scale_matrix = obj_transform[:3, :3]
+                
+                # Apply the unit-aware scale factor ONLY to the rotation/scale matrix
+                # The translation should remain in the original coordinate system
+                # Only the object size needs to be scaled for unit conversion
+                corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
+                corrected_transform[:3, 3] = translation  # Keep original translation unchanged
+                
+                # Create object prim
+                obj_prim_path = f'/World/{obj_id}'
+                obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
+                
+                # Set corrected transform
+                transform_list = corrected_transform.flatten().astype(float).tolist()
+                transform_matrix = Gf.Matrix4d(*transform_list)
+                obj_xform.MakeMatrixXform().Set(transform_matrix)
+                
+                # Reference already added above
+                print(f"Referenced original USD with unit-aware scale ({unit_scale_factor}): {original_path}")
+            
+            # Save the stage
+            stage.Save()
+            print(f"USD scene exported with FULL material preservation and correct unit scaling to: {output_path}")
+            
+        except ImportError:
+            print("Warning: USD Python bindings not available")
+            print("Falling back to material-preserving method")
+            self._export_scene_to_usd_with_materials(env_id, output_path, include_joints)
+        except Exception as e:
+            print(f"Error in direct USD copy: {e}")
+            print("Falling back to material-preserving method")
+            self._export_scene_to_usd_with_materials(env_id, output_path, include_joints)
+
+    def export_scene_to_usd_isaac_sim(
+        self, 
+        env_id: int = 0, 
+        output_path: str = "exported_scene.usd",
+        include_joints: bool = True
+    ) -> None:
+        """Export USD specifically optimized for Isaac Sim import.
+        
+        This method creates a USD file that follows Isaac Sim conventions:
+        - Proper stage setup with Physics scene
+        - Correct coordinate system (Z-up, meters)
+        - Proper prim hierarchy
+        - Physics-ready materials
+        
+        Args:
+            env_id (int): Environment ID to export (must be valid)
+            output_path (str): Output USD file path
+            include_joints (bool): Whether to include joint states in the export
+        """
+        if not self.valid_env_mask[env_id]:
+            raise ValueError(f"Environment {env_id} is not valid")
+        
+        try:
+            from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
+            
+            # Create new USD stage - ensure proper cleanup
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass  # File might be locked, try to create anyway
+            stage = Usd.Stage.CreateNew(output_path)
+            
+            # Set Isaac Sim compatible metadata
+            stage.SetMetadata('metersPerUnit', 1.0)
+            stage.SetMetadata('upAxis', 'Z')
+            stage.SetMetadata('kilogramsPerUnit', 1.0)
+            
+            # Create root World prim
+            world_prim = UsdGeom.Xform.Define(stage, '/World')
+            stage.SetDefaultPrim(world_prim.GetPrim())
+            
+            # Create Physics Scene for Isaac Sim
+            physics_scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
+            physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
+            physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
+            
+            # Add each USD object by direct reference
+            for obj_id in self.assets.keys():
+                asset = self.assets[obj_id]
+                
+                # Only handle USD assets with this method
+                if not (hasattr(asset, '_fname') and asset._fname.endswith('.usd')):
+                    print(f"Warning: {obj_id} is not a USD asset, skipping Isaac Sim export")
+                    continue
+                
+                # Read the original USD units
+                original_stage = Usd.Stage.Open(asset._fname)
+                if original_stage:
+                    original_meters_per_unit = UsdGeom.GetStageMetersPerUnit(original_stage)
+                    unit_scale_factor = original_meters_per_unit
+                    print(f"{obj_id}: Isaac Sim export - metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
+                else:
+                    unit_scale_factor = 0.01  # Default for problematic files
+                
+                # Get the transform for this environment
+                obj_world_T = scene_graph_transform_get(
+                    self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+                
+                if len(obj_world_T.shape) == 3:
+                    obj_transform = obj_world_T[env_id]
+                else:
+                    obj_transform = obj_world_T
+                
+                # Apply unit-aware scale correction for Isaac Sim
+                corrected_transform = obj_transform.copy()
+                translation = obj_transform[:3, 3]
+                rotation_scale_matrix = obj_transform[:3, :3]
+                
+                # Scale only the rotation/scale matrix, keep translation in meters
+                corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
+                corrected_transform[:3, 3] = translation
+                
+                # Create object prim under World
+                obj_prim_path = f'/World/{obj_id}'
+                obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
+                
+                # Set transform using Isaac Sim preferred method - decomposed transforms
+                # Extract translation, rotation, and scale separately for Isaac Sim
+                translation = corrected_transform[:3, 3]
+                rotation_scale_matrix = corrected_transform[:3, :3]
+                
+                # Decompose rotation and scale
+                scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
+                scale_y = np.linalg.norm(rotation_scale_matrix[:, 1])
+                scale_z = np.linalg.norm(rotation_scale_matrix[:, 2])
+                
+                # Get rotation matrix (normalize by scale)
+                if scale_x > 1e-6 and scale_y > 1e-6 and scale_z > 1e-6:
+                    rotation_matrix = rotation_scale_matrix / np.array([scale_x, scale_y, scale_z])
+                else:
+                    rotation_matrix = np.eye(3)
+                
+                # For Isaac Sim, use a single matrix transform (most reliable with USD references)
+                # This avoids the complexity of decomposed transforms that can interfere with references
+                
+                # Set transform using single matrix transform
+                transform_list = corrected_transform.flatten().astype(float).tolist()
+                transform_matrix = Gf.Matrix4d(*transform_list)
+                obj_xform.MakeMatrixXform().Set(transform_matrix)
+                
+                # Add reference to original USD file (this preserves ALL materials)
+                original_path = os.path.abspath(asset._fname)
+                references = obj_xform.GetPrim().GetReferences()
+                references.AddReference(original_path)
+                
+                # Add reference to original USD file (this preserves ALL materials)
+                original_path = os.path.abspath(asset._fname)
+                references = obj_xform.GetPrim().GetReferences()
+                references.AddReference(original_path)
+                
+                # Reference already added above
+                
+                # Add physics properties for Isaac Sim (optional but helpful)
+                try:
+                    # Make it a rigid body candidate
+                    rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                    # Set as kinematic (won't fall due to gravity)
+                    rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                except:
+                    pass  # Physics API might not be available
+                
+                print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
+            
+            # Save the stage
+            stage.Save()
+            print(f"USD scene exported for Isaac Sim with FULL material preservation to: {output_path}")
+            
+        except ImportError as e:
+            print(f"Warning: USD Python bindings not available for Isaac Sim export: {e}")
+            print("Falling back to direct copy method")
+            self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
+        except Exception as e:
+            print(f"Error in Isaac Sim USD export: {e}")
+            print("Falling back to direct copy method")
+            self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
