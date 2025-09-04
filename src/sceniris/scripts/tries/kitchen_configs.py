@@ -185,8 +185,18 @@ kitchen_config_2 = {
             "fixed_world_positions": [np.array([1.933, 0.85, 0.0])]
         },
         {
+            "id": "top_cabinat",
+            "asset_path": os.path.join(base_asset_path, "Kitchen_TopCabinet", "Kitchen_TopCabinet.usd"),
+            "rotation": {
+                "type": "uniform_z",
+                "lower": -0.00001,
+                "upper": 0.00001
+            },
+            "fixed_world_positions": [np.array([1.933*2, 0.85*2, 1.8])]
+        },
+        {
             "id": "cutting_board",
-            "asset_path": os.path.join(robocasa_asset_path, "cutting_board", "cutting_board_3", "model", "model.usd"),
+            "asset_path": os.path.join(robocasa_asset_path, "cutting_board", "cutting_board_12", "model", "model.usd"),
             "parent_id": "base_cabinat",
             "relation_to_parent": "top",
             "position": {
