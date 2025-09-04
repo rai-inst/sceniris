@@ -789,3 +789,25 @@ def visualize_polygons(polygons: list[Polygon]):
     for i, polygon in enumerate(polygons):
         plot_polygon(polygon, ax=ax, color=colors[i])
     plt.show()
+
+
+def batch_face_to_ori(obj_to_parent_pos2d: NDArray) -> NDArray:
+    """Batch face to orientation. By default it aligns (0, -1) to the direction `obj_to_parent_pos2d`
+
+    Args:
+        obj_to_parent_pos2d (NDArray): shape (N, 2), the object to parent position.
+
+    Returns:
+        NDArray: shape (N, 4, 4), the orientation.
+    """
+    direction = normalize_direction_vector(obj_to_parent_pos2d)
+
+    rotation_matrices = np.eye(4)[np.newaxis, :, :].repeat(direction.shape[0], axis=0)
+
+    # Fill in the top-left 2x2 part with the rotation values
+    rotation_matrices[:, 0, 0] = -direction[:, 1]
+    rotation_matrices[:, 0, 1] = -direction[:, 0]
+    rotation_matrices[:, 1, 0] = direction[:, 0]
+    rotation_matrices[:, 1, 1] = -direction[:, 1]
+
+    return rotation_matrices

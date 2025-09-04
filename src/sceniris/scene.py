@@ -39,6 +39,7 @@ from sceniris.pose_generators import (
     OrientationGeneratorConst,
     OrientationGeneratorStablePoses,
     OrientationGeneratorUniformAroundZ,
+    OrientationGeneratorFaceTo,
     PositionIteratorNone,
     PositionIteratorUniform, 
     PositionIterator2DCollection,
@@ -55,6 +56,7 @@ from sceniris.utils import (
     invalidate_scenegraph_cache,
     homogeneous_inv_batch,
     visualize_mesh,
+    batch_face_to_ori,
 )
 
 from sceniris.constraints import SurfaceRelation, TrackingTransform
@@ -261,6 +263,7 @@ class Scene(_Scene):
             # sph_pos = sph_pos.unsqueeze(0) + local_T[:, :3, 3].unsqueeze(1)      # (N, n_sph, 3)
             sph_radius = torch.stack([torch.tensor([s.radius], dtype=torch.float32) for s in query_sph_approx], dim=0)\
                         .unsqueeze(0).repeat(len(env_ids), 1, 1)                 # (N, n_sph, 1)
+            # print (sph_pos.size(), sph_radius.size())
             sph = tensor_args.to_device(torch.cat([sph_pos, sph_radius], dim=2)) # (N, n_sph, 4)
             sph = sph.unsqueeze(1) # (N, horizon(1), n_sph, 4)
             mesh_spheres.append(sph)
@@ -384,6 +387,9 @@ class Scene(_Scene):
 
             if parent_id is None:
                 parent_id = "world"
+            
+            if "fixed_world_positions" in kwargs and kwargs["fixed_world_positions"] is not None:
+                parent_id = "world"
 
             start_perf_counter_joint = time.perf_counter()
             joint_ids = []
@@ -417,9 +423,17 @@ class Scene(_Scene):
             while iter < max_iter:
                 start_perf_counter_iter_sampling = time.perf_counter()
                 n_working_envs = len(env_ids)
-                if "fixed_world_positions" in kwargs:
-                    #TODO: <jshang> handle fixed_world_positions
-                    pos = kwargs["fixed_world_positions"]
+
+                if "fixed_world_positions" in kwargs and kwargs["fixed_world_positions"] is not None:
+                    # currently only handle one pos
+                    pos3d = kwargs["fixed_world_positions"][0]
+                    if not isinstance(pos3d, np.ndarray):
+                        pos3d = np.array(pos3d)
+                    if len(pos3d.shape) == 1:
+                        pos3d = pos3d[np.newaxis, ...].repeat(n_working_envs, axis=0)
+                    working_env_ids = env_ids[:]
+                    support = position_iterator.support
+                    failed_env_ids = []
                 else:
                     if env_position_iterator is not None and isinstance(env_position_iterator, list) and len(env_position_iterator) > 0:
                         # st = time.time()
@@ -460,71 +474,95 @@ class Scene(_Scene):
                         working_env_ids = env_ids[:]
                         failed_env_ids = []
                     
+                    if isinstance(pos_raw, dict):
+                        pos = pos_raw["samples"]
+                        support = pos_raw["support_refs"]
+                    else:
+                        pos = pos_raw
+                        support = position_iterator.support
+                    # To avoid collisions with the support surface
+                    pos3d = np.concatenate([pos, np.full((pos.shape[0], 1), distance_above_support)], axis=1) \
+                        if pos.shape[-1] == 2 else pos  # normalized surface
+
                 # orientation (on normalized surface)
-                ori = orientation_iterator.sample(n_working_envs)
+                if isinstance(orientation_iterator, OrientationGeneratorFaceTo):
+                    ori = np.tile(np.eye(4), (n_working_envs, 1, 1))
+                else:
+                    ori = orientation_iterator.sample(n_working_envs)
+                
                 if len(ori.shape) == 2:
                     ori = np.tile(ori, (n_working_envs, 1, 1))
                 
-                if isinstance(pos_raw, dict):
-                    pos = pos_raw["samples"]
-                    support = pos_raw["support_refs"]
-                else:
-                    pos = pos_raw
-                    support = position_iterator.support
-                
                 logger.debug(f"support, {support}")
-
-                # To avoid collisions with the support surface
-                pos3d = np.concatenate([pos, np.full((pos.shape[0], 1), distance_above_support)], axis=1) \
-                    if pos.shape[-1] == 2 else pos  # normalized surface
 
                 logger.debug(f"{obj_id} sampled pos, {pos3d}")
 
                 end_perf_counter_iter_sampling = time.perf_counter()
                 print(f"Iter sampling: {end_perf_counter_iter_sampling - start_perf_counter_iter_sampling:.4f}")
 
-
                 start_perf_counter_iter_transform = time.perf_counter()
                 # Transform plane coordinates into scene coordinates
-                if isinstance(support, np.ndarray):
-                    # transform 3D coordinate with respect to the normalized surface to mesh frame
-                    support_transforms = get_support_transforms(support)
-                    placement_T = support_transforms @ point_to_translation_matrix(pos3d) @ ori
-                    support_node_names = get_support_node_names(support)
-                    parent_to_support_node = get_transform_batch(
-                        self, support_node_names, frame_from=parent_id) # parent -> mesh
-                    # support_node_names already has the same length as working_env_ids, so no need to index
-                elif isinstance(support, SupportSurface):
-                    placement_T = support.transform @ point_to_translation_matrix(pos3d) @ ori
-                    parent_to_support_node = scene_graph_transform_get(
-                        self._scene.graph, 
-                        support.node_name,
-                        frame_from=parent_id, 
-                        edge_batch=self.edge_batch, 
-                        cache=self.cache)[0] # parent -> mesh
-                    # only one support node, so need to index after getting transforms from all envs
-                    if len(parent_to_support_node.shape) == 3:
-                        parent_to_support_node = parent_to_support_node[working_env_ids]
-                    support_node_names = [support.node_name]
-                else:
-                    raise ValueError(f"Invalid supports: {support}")
+                if (not "fixed_world_positions" in kwargs) or (kwargs.get("fixed_world_positions") is None):
+                    if isinstance(support, np.ndarray):
+                        # transform 3D coordinate with respect to the normalized surface to mesh frame
+                        support_transforms = get_support_transforms(support)
+                        placement_T = support_transforms @ point_to_translation_matrix(pos3d) @ ori
+                        support_node_names = get_support_node_names(support)
+                        parent_to_support_node = get_transform_batch(
+                            self, support_node_names, frame_from=parent_id) # parent -> mesh
+                        # support_node_names already has the same length as working_env_ids, so no need to index
+                    elif isinstance(support, SupportSurface):
+                        placement_T = support.transform @ point_to_translation_matrix(pos3d) @ ori
+                        parent_to_support_node = scene_graph_transform_get(
+                            self._scene.graph, 
+                            support.node_name,
+                            frame_from=parent_id, 
+                            edge_batch=self.edge_batch, 
+                            cache=self.cache)[0] # parent -> mesh
+                        # only one support node, so need to index after getting transforms from all envs
+                        if len(parent_to_support_node.shape) == 3:
+                            parent_to_support_node = parent_to_support_node[working_env_ids]
+                        support_node_names = [support.node_name]
+                    else:
+                        raise ValueError(f"Invalid supports: {support}")
 
-                logger.debug(f"placement_T before parent to support node, {placement_T[..., :3, 3]}")
-                logger.debug(f"parent_to_support_node, {parent_to_support_node[..., :3, 3]}")
-                placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
-                logger.debug(f"placement T, {placement_T[..., :3, 3]}")
+                    logger.debug(f"placement_T before parent to support node, {placement_T[..., :3, 3]}")
+                    logger.debug(f"parent_to_support_node, {parent_to_support_node[..., :3, 3]}")
+                    placement_T = parent_to_support_node @ placement_T # parent -> mesh @ mesh -> obj
+                    logger.debug(f"placement T, {placement_T[..., :3, 3]}")
+                    
+                    if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
+                        world_to_parent = scene_graph_transform_get(
+                            self._scene.graph, parent_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+                        if len(world_to_parent.shape) == 3:
+                            world_to_parent = world_to_parent[working_env_ids]
+                    else:
+                        world_to_parent = np.eye(4)
                 
-                if (parent_id is not None) and (parent_id in self._scene.graph.transforms.node_data):
-                    world_to_parent = scene_graph_transform_get(
-                        self._scene.graph, parent_id, edge_batch=self.edge_batch, cache=self.cache)[0]
-                    if len(world_to_parent.shape) == 3:
-                        world_to_parent = world_to_parent[working_env_ids]
+                    world_T = world_to_parent @ placement_T # T_w_obj, (len(working_env_ids), 4, 4)
                 else:
-                    world_to_parent = np.eye(4)
-            
-                world_T = world_to_parent @ placement_T # T_w_obj, (len(working_env_ids), 4, 4)
-                logger.debug(f"world T, {world_T[..., :3, 3]}")
+                    world_T = point_to_translation_matrix(pos3d) @ ori
+                    placement_T = world_T.copy()
+                
+                if isinstance(orientation_iterator, OrientationGeneratorFaceTo):
+                    face_to_object_id = orientation_iterator.face_to_object_id
+                    world_to_facetoobject = scene_graph_transform_get(
+                        self._scene.graph, face_to_object_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+                    if len(world_to_facetoobject.shape) == 3:
+                        world_to_facetoobject = world_to_facetoobject[working_env_ids]
+                        obj_to_parent_pos = world_to_facetoobject[..., :3, 3] - world_T[..., :3, 3]
+                    else:
+                        obj_to_parent_pos = world_to_facetoobject[:3, 3] -  world_T[..., :3, 3]
+                    
+                    obj_to_parent_pos2d = obj_to_parent_pos[..., :2]
+                    if len(obj_to_parent_pos2d.shape) == 1:
+                        obj_to_parent_pos2d = obj_to_parent_pos2d[np.newaxis, ...].repeat(n_working_envs, axis=0) # (N, 2)
+                    
+                    face_to_ori = batch_face_to_ori(obj_to_parent_pos2d) # (N, 4, 4)
 
+                    world_T[:, :3, :3] = face_to_ori[:, :3, :3]
+                    placement_T[:, :3, :3] = face_to_ori[:, :3, :3]
+                logger.debug(f"world T, {world_T[..., :3, 3]}")
                 end_perf_counter_iter_transform = time.perf_counter()
                 print(f"Compute world transform: {end_perf_counter_iter_transform - start_perf_counter_iter_transform:.4f}")
 
@@ -557,7 +595,7 @@ class Scene(_Scene):
 
                 # Check custom validity function
                 # disable for now
-                
+
                 # Check collisions
                 start_perf_counter_collision_check = time.perf_counter()
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
@@ -689,6 +727,8 @@ class Scene(_Scene):
         if obj_orientation_iterator is None:
             obj_orientation_iterator = OrientationGeneratorUniformAroundZ(
                 seed=self._rng, replenish_size=self.num_envs*2)
+
+        print (obj_id, obj_orientation_iterator)
 
         env_obj_position_iterator = None
         if obj_position_iterator is None:
@@ -1154,13 +1194,14 @@ class Scene(_Scene):
                     of that axis.
             "rotation": dict[str, Any] | None, # the rotation of the object, only used for the object that is not a part of the parent object
                 if None, uniformly sample a rotation around z.
-                "type": Literal["uniform_z", "stable", "constant"], # the type of the rotation. `stable` is randomly sample a stable
+                "type": Literal["uniform_z", "stable", "constant", "face_to"], # the type of the rotation. `stable` is randomly sample a stable
                     pose of the object. `uniform_z` is uniformly sample a rotation around z. 
                     `constant` is a constant rotation
                 "orientation": float | NDArray, # the orientation of the object, only used for type `constant`.
                     float value means constant rotation around z, in rad, otherwise, it should be a 4x4 transform matrix.
                 "lower": float, # the lower bound of the rotation, only used for "uniform_z"
                 "upper": float, # the upper bound of the rotation, only used for "uniform_z"
+                "face_to_object_id": str, # the object id to face to, only used for "face_to"
             "parent_id": str, # must be the object that supports or contains the object to be added. 
                 If None, the object will be placed on the plane.
             "relation_to_parent": Literal["top", "inside"] | None, If None, the object will be placed on the top of the plane.
@@ -1240,13 +1281,13 @@ class Scene(_Scene):
                         support_id, 
                         geom_ids=parent_id, 
                         exclude_support_polyhedra=True, 
-                        min_area=0.005, 
+                        min_area=0.002, 
                     )
                 elif relation_to_parent == "inside":
                     self.label_support(
                         support_id, 
                         geom_ids=parent_id, 
-                        min_area=0.005,
+                        min_area=0.002,
                         consider_support_polyhedra=True,
                     )
             logger.debug(f'existing supports, {list(self._scene.metadata["support_polygons"].keys())}')
@@ -1280,6 +1321,11 @@ class Scene(_Scene):
                     orientation=rotation_cfg.get("orientation", 0.0),
                     replenish_size=self.num_envs*2,
                     degrees=True
+                )
+            elif rotation_cfg["type"] == "face_to":
+                placement_args["obj_orientation_iterator"] = OrientationGeneratorFaceTo(
+                    face_to_object_id=rotation_cfg.get("face_to_object_id", None),
+                    replenish_size=self.num_envs*2,
                 )
             else:
                 placement_args["obj_orientation_iterator"] = None
@@ -1327,6 +1373,7 @@ class Scene(_Scene):
             placement_args["constraint"] = None
         
         placement_args["check_reachability"] = obj_cfg.get("reachable", False)
+        placement_args["fixed_world_positions"] = obj_cfg.get("fixed_world_positions", None)
         return placement_args
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):

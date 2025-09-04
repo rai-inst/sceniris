@@ -112,6 +112,17 @@ class OrientationGeneratorStablePoses(PoseGenerator):
 
     def __next__(self):
         return self.sample(1)[0]
+    
+
+class OrientationGeneratorFaceTo(PoseGenerator):
+    # TODO: better design of this
+    def __init__(self, face_to_object_id: str, seed=None, replenish_size=DEFAULT_REPLISH_SIZE):
+        super().__init__(seed, replenish_size)
+        self.face_to_object_id = face_to_object_id
+        self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
+    
+    def replenish(self) -> None:
+        raise NotImplementedError
 
 
 class PositionIterator3D(PoseGenerator):
