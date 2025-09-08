@@ -105,6 +105,7 @@ class Scene(_Scene):
         self._curobo_mesh_sphere_cache = {}
         self.CUROBO_SPHERE_APPROX_N = 200
         self._reachability_checker = None
+        self._all_constraints = []
 
     def _init_reachability_checker(self):
         """Initialize the reachability checker if not already done."""
@@ -1369,6 +1370,8 @@ class Scene(_Scene):
                     relation_axis_transform = c.get("relation_axis_transform", np.eye(4)),
                 )
                 placement_args["constraint"].append(constraint)
+                self._all_constraints.append(constraint)
+
             if len(placement_args["constraint"]) == 1:
                 placement_args["constraint"] = placement_args["constraint"][0]
             else:
@@ -1383,6 +1386,45 @@ class Scene(_Scene):
         placement_args["check_reachability"] = obj_cfg.get("reachable", False)
         placement_args["fixed_world_positions"] = obj_cfg.get("fixed_world_positions", None)
         return placement_args
+
+    def show_supports(
+        self,
+        support_id_query=None,
+        layers=None,
+        color=None,
+        use_path_geometry=False,
+        extruded_polygon_height=1e-3,
+    ):
+        """Show labelled supports in trimesh viewer, optionally on top of scene.
+
+        Note: If only supports need to be shown, use argument `layers=['support']`.
+
+        Args:
+            support_id_query (str or list or regex, optional): A string, list, or regular expression that refers to support IDs. None means all supports. Defaults to None.
+            layers (list[str], optional): A list of visible layer names. If None everything will be visible. Defaults to None.
+            color (list[int], optional): An RGBA value used to color the supports. If None, random color is chosen. Defaults to None.
+            use_path_geometry (bool, optional): Whether to use a trimesh.path.Path3D or an extruded polygon (trimesh.Trimesh) as geometry. Defaults to False (trimesh.Trimesh).
+            extruded_polygon_height (bool, optional): If `use_path_geometry=False` this defines the height of the extrusion. Defaults to 1e-3.
+        """
+        if support_id_query is None:
+            for i, constraint in enumerate(self._all_constraints):
+                self._scene.metadata["support_polygons"][f"constraint_support_{i}"] = constraint.scene_supports[0]
+        
+        del self._scene.metadata["support_polygons"]["_support__plane_top"]
+        print (list(self._scene.metadata["support_polygons"].keys()))
+        print (self._scene.metadata["support_polygons"])
+
+        s = self.support_scene(
+            support_id_query=support_id_query,
+            color=color,
+            use_path_geometry=use_path_geometry,
+            extruded_polygon_height=extruded_polygon_height,
+        )
+        if layers == ["support"]:
+            # This is significantly faster than hiding everything
+            s.show()
+        else:
+            self.show(layers=layers, other_scene=s, env_ids=np.arange(1))
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
         """Show scene using the trimesh viewer.
@@ -1429,7 +1471,7 @@ class Scene(_Scene):
                     [0, 1, 0, self.env_size * 1.2 * (env_id % n_cols)],
                     [0, 0, 1, 0],
                     [0, 0, 0, 1]
-                ])) for env_id in env_ids])
+                ])) + other_scene for env_id in env_ids])
             # scene_to_show.bounds = get_scene_bounds(scene_to_show)
         
         if enable_viewer:
