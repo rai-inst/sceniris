@@ -1465,13 +1465,22 @@ class Scene(_Scene):
             num_vis_envs = len(env_ids)
             n_cols = int(np.floor(np.sqrt(num_vis_envs)))
 
-            scene_to_show = combine_scenes([
-                get_scene_by_env_id(env_id, np.array([
-                    [1, 0, 0, self.env_size * 1.2 * (env_id // n_cols)],
-                    [0, 1, 0, self.env_size * 1.2 * (env_id % n_cols)],
-                    [0, 0, 1, 0],
-                    [0, 0, 0, 1]
-                ])) + other_scene for env_id in env_ids])
+            if other_scene is not None:
+                scene_to_show = combine_scenes([
+                    get_scene_by_env_id(env_id, np.array([
+                        [1, 0, 0, self.env_size * 1.2 * (env_id // n_cols)],
+                        [0, 1, 0, self.env_size * 1.2 * (env_id % n_cols)],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]
+                    ])) + other_scene for env_id in env_ids])
+            else:
+                scene_to_show = combine_scenes([
+                    get_scene_by_env_id(env_id, np.array([
+                        [1, 0, 0, self.env_size * 1.2 * (env_id // n_cols)],
+                        [0, 1, 0, self.env_size * 1.2 * (env_id % n_cols)],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]
+                    ])) for env_id in env_ids])
             # scene_to_show.bounds = get_scene_bounds(scene_to_show)
         
         if enable_viewer:
