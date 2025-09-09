@@ -5,18 +5,23 @@ import os
 
 try:
     from rm4d import ReachabilityMap4D, ReachabilityMap4DGPU
+    import rm4d
+    rm4d_path = rm4d.__path__[0]
 except ImportError as e:
     print(f"Warning: Could not import rm4d: {e}")
     ReachabilityMap4D = None
     ReachabilityMap4DGPU = None
+    rm4d_path = None
 
 
 class ReachabilityChecker:
     """
     A reachability checker that uses rm4d to determine if poses are reachable.
     """
+
+    # TODO: deal with the case that robot could be within a bound (e.g. mobility robot)
     
-    def __init__(self, map_path: str = None, use_gpu: bool = True):
+    def __init__(self, map_path: str | None = None, use_gpu: bool = True):
         """
         Initialize the reachability checker with a pre-computed reachability map.
         
@@ -25,9 +30,14 @@ class ReachabilityChecker:
             use_gpu: Whether to use GPU acceleration for reachability
         """
         if map_path is None:
-            map_path = ("rm4d/experiment_scripts/data/"
-                        "rm4d_franka_joint_42_0.05/20000000/rmap.npy")
-        
+            if rm4d_path is None:
+                raise ValueError("rm4d_path is not set")
+            map_path = os.path.join(
+                os.path.dirname(rm4d_path),
+                "experiment_scripts/data/rm4d_franka_joint_42_0.05/20000000/rmap.npy"
+            )
+            print (f"Using default rm4d map path: {map_path}")
+
         if ReachabilityMap4D is None:
             raise ImportError(
                 "rm4d package not available. Please install it first.")
