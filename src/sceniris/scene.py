@@ -1511,6 +1511,14 @@ class Scene(_Scene):
                 # Scale only the rotation/scale matrix, keep translation in meters
                 corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
                 corrected_transform[:3, 3] = translation
+
+                bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
+                root = stage.GetPseudoRoot()
+                # Compute the bounding box of the pseudo-root, which encompasses the entire stage
+                stage_bound = bbox_cache.ComputeWorldBound(root)
+                object_height = stage_bound.GetBox().size[2]
+
+                corrected_transform[2, 3] += object_height / 2
                 
                 # Create object prim under World
                 obj_prim_path = f'/World/{obj_id}'
@@ -1520,6 +1528,8 @@ class Scene(_Scene):
                 # Extract translation, rotation, and scale separately for Isaac Sim
                 translation = corrected_transform[:3, 3]
                 rotation_scale_matrix = corrected_transform[:3, :3]
+
+
                 
                 # Decompose rotation and scale
                 scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
