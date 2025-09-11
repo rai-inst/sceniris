@@ -10,6 +10,7 @@ from collections import defaultdict
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial.transform import Rotation
 
 import trimesh
 import trimesh.transformations as tra
@@ -1505,12 +1506,13 @@ class Scene(_Scene):
                 
                 # Apply unit-aware scale correction for Isaac Sim
                 corrected_transform = obj_transform.copy()
-                translation = obj_transform[:3, 3]
+                translation = obj_transform[:3, 3] 
                 rotation_scale_matrix = obj_transform[:3, :3]
                 
                 # Scale only the rotation/scale matrix, keep translation in meters
-                corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
-                corrected_transform[:3, 3] = translation
+                # corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
+                # corrected_transform[:3, 3] = translation 
+                print(f" {obj_id}: Isaac Sim export - translation: {translation}")
 
                 bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
                 root = original_stage.GetPseudoRoot()
@@ -1518,7 +1520,7 @@ class Scene(_Scene):
                 stage_bound = bbox_cache.ComputeWorldBound(root)
                 object_height = stage_bound.GetRange().GetSize()[2] * unit_scale_factor
 
-                corrected_transform[2, 3] += object_height / 2
+                # corrected_transform[2, 3] += object_height / 2
                 
                 # Create object prim under World
                 obj_prim_path = f'/World/{obj_id}'
@@ -1526,8 +1528,8 @@ class Scene(_Scene):
                 
                 # Set transform using Isaac Sim preferred method - decomposed transforms
                 # Extract translation, rotation, and scale separately for Isaac Sim
-                translation = corrected_transform[:3, 3]
-                rotation_scale_matrix = corrected_transform[:3, :3]
+                # translation = corrected_transform[:3, 3]
+                # rotation_scale_matrix = corrected_transform[:3, :3]
                 
                 # Decompose rotation and scale
                 # scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
@@ -1546,7 +1548,13 @@ class Scene(_Scene):
                 # Set transform using single matrix transform
                 transform_list = corrected_transform.flatten().astype(float).tolist()
                 transform_matrix = Gf.Matrix4d(*transform_list)
-                obj_xform.MakeMatrixXform().Set(transform_matrix)
+                # obj_xform.MakeMatrixXform().Set(transform_matrix)
+                obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0] * unit_scale_factor, translation[1] * unit_scale_factor, translation[2] * unit_scale_factor))
+                obj_xform.AddScaleOp().Set(Gf.Vec3d(unit_scale_factor, unit_scale_factor, unit_scale_factor))
+                r = Rotation.from_matrix(np.array(rotation_scale_matrix))
+                euler_angles = r.as_euler('xyz', degrees=True)
+                obj_xform.AddRotateXYZOp().Set(value=Gf.Vec3f(*euler_angles))
+
                 
                 # Add reference to original USD file (this preserves ALL materials)
                 original_path = os.path.abspath(asset._fname)
