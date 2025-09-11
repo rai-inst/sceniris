@@ -1516,7 +1516,7 @@ class Scene(_Scene):
                 root = stage.GetPseudoRoot()
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                 stage_bound = bbox_cache.ComputeWorldBound(root)
-                object_height = stage_bound.GetBox().size[2]
+                object_height = stage_bound.GetRange().GetSize()[2]
 
                 corrected_transform[2, 3] += object_height / 2
                 
