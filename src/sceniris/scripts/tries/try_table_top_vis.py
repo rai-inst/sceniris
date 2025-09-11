@@ -77,6 +77,15 @@ scene.gen()
 time_taken = time.time() - st
 print (f"first round gen taken: {time_taken:.4f}s, invalid envs: {args.num_envs - int(scene.valid_env_mask.sum())}")
 
+valid_env_ids = np.where(scene.valid_env_mask)[0]
+
+# Export the first valid environment to USD
+if len(valid_env_ids) > 0:
+    for export_env_id in valid_env_ids:
+        output_usd_path = os.path.join(benchmark_dir, f"scene_env_{export_env_id:03d}.usd")
+        print(f"Exporting environment {export_env_id} to USD for Isaac Sim: {output_usd_path}")
+        scene.export_scene_to_usd_isaac_sim(env_id=export_env_id, output_path=output_usd_path)
+
 if args.visualize:
     # scene.show_supports()
     # scene.show_graph()
