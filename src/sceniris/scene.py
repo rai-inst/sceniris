@@ -1516,7 +1516,7 @@ class Scene(_Scene):
                 root = original_stage.GetPseudoRoot()
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                 stage_bound = bbox_cache.ComputeWorldBound(root)
-                object_height = stage_bound.GetRange().GetSize()[2]
+                object_height = stage_bound.GetRange().GetSize()[2] * unit_scale_factor
 
                 corrected_transform[2, 3] += object_height / 2
                 
@@ -1528,19 +1528,17 @@ class Scene(_Scene):
                 # Extract translation, rotation, and scale separately for Isaac Sim
                 translation = corrected_transform[:3, 3]
                 rotation_scale_matrix = corrected_transform[:3, :3]
-
-
                 
                 # Decompose rotation and scale
-                scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
-                scale_y = np.linalg.norm(rotation_scale_matrix[:, 1])
-                scale_z = np.linalg.norm(rotation_scale_matrix[:, 2])
+                # scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
+                # scale_y = np.linalg.norm(rotation_scale_matrix[:, 1])
+                # scale_z = np.linalg.norm(rotation_scale_matrix[:, 2])
                 
-                # Get rotation matrix (normalize by scale)
-                if scale_x > 1e-6 and scale_y > 1e-6 and scale_z > 1e-6:
-                    rotation_matrix = rotation_scale_matrix / np.array([scale_x, scale_y, scale_z])
-                else:
-                    rotation_matrix = np.eye(3)
+                # # Get rotation matrix (normalize by scale)
+                # if scale_x > 1e-6 and scale_y > 1e-6 and scale_z > 1e-6:
+                #     rotation_matrix = rotation_scale_matrix / np.array([scale_x, scale_y, scale_z])
+                # else:
+                #     rotation_matrix = np.eye(3)
                 
                 # For Isaac Sim, use a single matrix transform (most reliable with USD references)
                 # This avoids the complexity of decomposed transforms that can interfere with references
