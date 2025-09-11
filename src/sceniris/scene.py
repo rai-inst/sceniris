@@ -1513,7 +1513,7 @@ class Scene(_Scene):
                 corrected_transform[:3, 3] = translation
 
                 bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
-                root = stage.GetPseudoRoot()
+                root = original_stage.GetPseudoRoot()
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                 stage_bound = bbox_cache.ComputeWorldBound(root)
                 object_height = stage_bound.GetRange().GetSize()[2]
