@@ -1473,7 +1473,8 @@ class Scene(_Scene):
             stage.SetDefaultPrim(world_prim.GetPrim())
             
             # Create Physics Scene for Isaac Sim
-            physics_scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
+            physics_scene_path = '/World/PhysicsScene'
+            physics_scene = UsdPhysics.Scene.Define(stage, physics_scene_path)
             physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
             physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
             
@@ -1561,7 +1562,12 @@ class Scene(_Scene):
                 #     # Set as kinematic (won't fall due to gravity)
                 #     rigid_body_api.CreateKinematicEnabledAttr().Set(True)
                 # except:
-                #     print (f"Skip adding rigid and collsion API to object {obj_id}")                
+                #     print (f"Skip adding rigid and collsion API to object {obj_id}")
+                try:
+                    articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
+                    articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
+                except:
+                    print (f"Skip adding articulation API to object {obj_id}")
                 print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
             
             # Save the stage
