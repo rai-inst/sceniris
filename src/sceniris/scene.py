@@ -1505,9 +1505,10 @@ class Scene(_Scene):
                     obj_transform = obj_world_T
                 
                 # Apply unit-aware scale correction for Isaac Sim
-                corrected_transform = obj_transform.copy()
-                translation = obj_transform[:3, 3] 
-                rotation_scale_matrix = obj_transform[:3, :3]
+                obj_transform_copy = obj_transform.copy()
+                obj_transform_copy.flags["WRITEABLE"] = True
+                translation = obj_transform_copy[:3, 3] 
+                rotation_scale_matrix = obj_transform_copy[:3, :3]
                 
                 # Scale only the rotation/scale matrix, keep translation in meters
                 # corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
@@ -1525,37 +1526,14 @@ class Scene(_Scene):
                 center = bound_range.GetMidpoint()
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                 object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
-
-                translation -= np.array(center)
+                print (f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
+                translation -= np.array([center[0], center[1], center[2]])
                 translation[2] += object_height / 2
                 
                 # Create object prim under World
                 obj_prim_path = f'/World/{obj_id}'
                 obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
                 
-                # Set transform using Isaac Sim preferred method - decomposed transforms
-                # Extract translation, rotation, and scale separately for Isaac Sim
-                # translation = corrected_transform[:3, 3]
-                # rotation_scale_matrix = corrected_transform[:3, :3]
-                
-                # Decompose rotation and scale
-                # scale_x = np.linalg.norm(rotation_scale_matrix[:, 0])
-                # scale_y = np.linalg.norm(rotation_scale_matrix[:, 1])
-                # scale_z = np.linalg.norm(rotation_scale_matrix[:, 2])
-                
-                # # Get rotation matrix (normalize by scale)
-                # if scale_x > 1e-6 and scale_y > 1e-6 and scale_z > 1e-6:
-                #     rotation_matrix = rotation_scale_matrix / np.array([scale_x, scale_y, scale_z])
-                # else:
-                #     rotation_matrix = np.eye(3)
-                
-                # For Isaac Sim, use a single matrix transform (most reliable with USD references)
-                # This avoids the complexity of decomposed transforms that can interfere with references
-                
-                # Set transform using single matrix transform
-                transform_list = corrected_transform.flatten().astype(float).tolist()
-                transform_matrix = Gf.Matrix4d(*transform_list)
-                # obj_xform.MakeMatrixXform().Set(transform_matrix)
                 obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0], translation[1], translation[2]))
                 obj_xform.AddScaleOp().Set(Gf.Vec3d(unit_scale_factor, unit_scale_factor, unit_scale_factor))
                 r = Rotation.from_matrix(np.array(rotation_scale_matrix))
