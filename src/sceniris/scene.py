@@ -1527,7 +1527,7 @@ class Scene(_Scene):
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                 object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
                 print (f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
-                translation -= np.array([center[0], center[1], center[2]])
+                translation -= np.array([center[0], center[1], center[2]]) * unit_scale_factor
                 translation[2] += object_height / 2
                 
                 # Create object prim under World
