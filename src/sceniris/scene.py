@@ -1516,10 +1516,17 @@ class Scene(_Scene):
 
                 bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
                 root = original_stage.GetPseudoRoot()
+                imageable = UsdGeom.Imageable(root)
+                # Use Usd.TimeCode.Default() for the default time sample
+                time = Usd.TimeCode.Default()
+                # 'default' purpose is a common choice for general visibility
+                bound = imageable.ComputeWorldBound(time, UsdGeom.Tokens.default_)
+                bound_range = bound.GetRange()
+                center = bound_range.GetMidpoint()
                 # Compute the bounding box of the pseudo-root, which encompasses the entire stage
-                stage_bound = bbox_cache.ComputeWorldBound(root)
-                object_height = stage_bound.GetRange().GetSize()[2] * unit_scale_factor
+                object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
 
+                translation -= np.array(center)
                 translation[2] += object_height / 2
                 
                 # Create object prim under World
