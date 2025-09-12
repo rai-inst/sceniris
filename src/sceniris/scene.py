@@ -1554,14 +1554,14 @@ class Scene(_Scene):
                 # Reference already added above
                 
                 # Add physics properties for Isaac Sim (optional but helpful)
-                try:
-                    # Make it a rigid body candidate
-                    rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
-                    UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
-                    # Set as kinematic (won't fall due to gravity)
-                    rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                except:
-                    print (f"Skip adding rigid and collsion API to object {obj_id}")                
+                # try:
+                #     # Make it a rigid body candidate
+                #     rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                #     UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
+                #     # Set as kinematic (won't fall due to gravity)
+                #     rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                # except:
+                #     print (f"Skip adding rigid and collsion API to object {obj_id}")                
                 print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
             
             # Save the stage
