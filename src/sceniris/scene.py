@@ -1554,8 +1554,8 @@ class Scene(_Scene):
                 
                 # add usd physics apis
                 try:
-                    rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
-                    rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                    # rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                    # rigid_body_api.CreateKinematicEnabledAttr().Set(True)
                     UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
                     articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
                     articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
