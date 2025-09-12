@@ -1499,6 +1499,11 @@ class Scene(_Scene):
                 # Get the transform for this environment
                 obj_world_T = scene_graph_transform_get(
                     self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
+
+                if obj_id in self.joint_states:
+                    obj_joint_states = self.joint_states[obj_id]
+                else:
+                    obj_joint_states = None
                 
                 if len(obj_world_T.shape) == 3:
                     obj_transform = obj_world_T[env_id]
@@ -1556,12 +1561,20 @@ class Scene(_Scene):
                 try:
                     # rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
                     # rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                    UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
+                    # UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
                     articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
                     articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
                 except:
                     print (f"Skip adding articulation API to object {obj_id}")
                 print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
+
+                for prim in obj_xform.GetPrim().GetChildren():
+                    if prim.IsA(UsdPhysics.Joint):
+                        for joint_name in self.joint_states[obj_id]:
+                            if joint_name in str(prim.GetPath()):
+                                target_pos_attr = prim.GetAttribute("drive:linear:physics:targetPosition")
+                                target_pos_attr.Set(self.joint_states[obj_id][joint_name][env_id])
+                                break
             
             # Save the stage
             stage.Save()
