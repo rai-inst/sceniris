@@ -96,12 +96,14 @@ valid_env_ids = np.where(scene.valid_env_mask)[0]
 # Export the first valid environment to USD
 if len(valid_env_ids) > 0:
     for export_env_id in valid_env_ids:
-        output_usd_path = os.path.join("./", f"scene_env_{export_env_id:03d}.usd")
-        print(f"Exporting environment {export_env_id} to USD for Isaac Sim: {output_usd_path}")
-        scene.export_scene_to_usd_isaac_sim(env_id=export_env_id, output_path=output_usd_path)
+        # output_usd_path = os.path.join("./", f"scene_env_{export_env_id:03d}.usd")
+        # print(f"Exporting environment {export_env_id} to USD for Isaac Sim: {output_usd_path}")
+        # scene.export_scene_to_usd_isaac_sim(env_id=export_env_id, output_path=output_usd_path)
+        output_usd_path = os.path.join("./", f"scene_envs_all.usd")
+        scene.export_scene_to_usd_isaac_sim(env_ids=valid_env_ids, output_path=output_usd_path)
 
 if args.visualize:
     print (list(scene._scene.metadata["support_polygons"].keys()))
     # scene.show_supports()
     # scene.show_graph()
-    scene.show(env_ids=np.arange(1))
+    scene.show(env_ids=np.arange(scene.num_envs))

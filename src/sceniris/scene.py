@@ -1432,7 +1432,7 @@ class Scene(_Scene):
 
     def export_scene_to_usd_isaac_sim(
         self, 
-        env_id: int = 0, 
+        env_ids: np.array = np.array([0]), 
         output_path: str = "exported_scene.usd",
         include_joints: bool = True
     ) -> None:
@@ -1449,9 +1449,6 @@ class Scene(_Scene):
             output_path (str): Output USD file path
             include_joints (bool): Whether to include joint states in the export
         """
-        if not self.valid_env_mask[env_id]:
-            raise ValueError(f"Environment {env_id} is not valid")
-        
         try:
             from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
             
@@ -1477,105 +1474,118 @@ class Scene(_Scene):
             physics_scene = UsdPhysics.Scene.Define(stage, physics_scene_path)
             physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
             physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
+
+            n_cols = int(np.floor(np.sqrt(len(env_ids))))
             
             # Add each USD object by direct reference
-            for obj_id in self.assets.keys():
-                asset = self.assets[obj_id]
-                
-                # Only handle USD assets with this method
-                if not (hasattr(asset, '_fname') and asset._fname.endswith('.usd')):
-                    print(f"Warning: {obj_id} is not a USD asset, skipping Isaac Sim export")
+            for i, env_id in enumerate(env_ids):
+                env_prim = UsdGeom.Xform.Define(stage, f'/World/env_{env_id}')
+                env_translation = np.array([
+                    self.env_size * 1.5 * (env_id // n_cols),
+                    self.env_size * 1.5 * (env_id % n_cols),
+                    0
+                ])
+
+                if not self.valid_env_mask[env_id]:
                     continue
-                
-                # Read the original USD units
-                original_stage = Usd.Stage.Open(asset._fname)
-                if original_stage:
-                    original_meters_per_unit = UsdGeom.GetStageMetersPerUnit(original_stage)
-                    unit_scale_factor = original_meters_per_unit
-                    print(f"{obj_id}: Isaac Sim export - metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
-                else:
-                    unit_scale_factor = 0.01  # Default for problematic files
-                
-                # Get the transform for this environment
-                obj_world_T = scene_graph_transform_get(
-                    self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
 
-                if obj_id in self.joint_states:
-                    obj_joint_states = self.joint_states[obj_id]
-                else:
-                    obj_joint_states = None
-                
-                if len(obj_world_T.shape) == 3:
-                    obj_transform = obj_world_T[env_id]
-                else:
-                    obj_transform = obj_world_T
-                
-                # Apply unit-aware scale correction for Isaac Sim
-                obj_transform_copy = obj_transform.copy()
-                obj_transform_copy.flags["WRITEABLE"] = True
-                translation = obj_transform_copy[:3, 3] 
-                rotation_scale_matrix = obj_transform_copy[:3, :3]
-                
-                # Scale only the rotation/scale matrix, keep translation in meters
-                # corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
-                # corrected_transform[:3, 3] = translation 
-                print(f" {obj_id}: Isaac Sim export - translation: {translation}")
+                for obj_id in self.assets.keys():
+                    asset = self.assets[obj_id]
+                    
+                    # Only handle USD assets with this method
+                    if not (hasattr(asset, '_fname') and asset._fname.endswith('.usd')):
+                        print(f"Warning: {obj_id} is not a USD asset, skipping Isaac Sim export")
+                        continue
+                    
+                    # Read the original USD units
+                    original_stage = Usd.Stage.Open(asset._fname)
+                    if original_stage:
+                        original_meters_per_unit = UsdGeom.GetStageMetersPerUnit(original_stage)
+                        unit_scale_factor = original_meters_per_unit
+                        print(f"{obj_id}: Isaac Sim export - metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
+                    else:
+                        unit_scale_factor = 0.01  # Default for problematic files
+                    
+                    # Get the transform for this environment
+                    obj_world_T = scene_graph_transform_get(
+                        self._scene.graph, obj_id, edge_batch=self.edge_batch, cache=self.cache)[0]
 
-                bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
-                root = original_stage.GetPseudoRoot()
-                imageable = UsdGeom.Imageable(root)
-                # Use Usd.TimeCode.Default() for the default time sample
-                time = Usd.TimeCode.Default()
-                # 'default' purpose is a common choice for general visibility
-                bound = imageable.ComputeWorldBound(time, UsdGeom.Tokens.default_)
-                bound_range = bound.GetRange()
-                center = bound_range.GetMidpoint()
-                # Compute the bounding box of the pseudo-root, which encompasses the entire stage
-                object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
-                print (f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
-                translation -= np.array([center[0], center[1], center[2]]) * unit_scale_factor
-                translation[2] += object_height / 2
-                
-                # Create object prim under World
-                obj_prim_path = f'/World/{obj_id}'
-                obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
-                
-                obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0], translation[1], translation[2]))
-                obj_xform.AddScaleOp().Set(Gf.Vec3d(unit_scale_factor, unit_scale_factor, unit_scale_factor))
-                r = Rotation.from_matrix(np.array(rotation_scale_matrix))
-                euler_angles = r.as_euler('xyz', degrees=True)
-                obj_xform.AddRotateXYZOp().Set(value=Gf.Vec3f(*euler_angles))
+                    if obj_id in self.joint_states:
+                        obj_joint_states = self.joint_states[obj_id]
+                    else:
+                        obj_joint_states = None
+                    
+                    if len(obj_world_T.shape) == 3:
+                        obj_transform = obj_world_T[env_id]
+                    else:
+                        obj_transform = obj_world_T
+                    
+                    # Apply unit-aware scale correction for Isaac Sim
+                    obj_transform_copy = obj_transform.copy()
+                    obj_transform_copy.flags["WRITEABLE"] = True
+                    translation = obj_transform_copy[:3, 3] 
+                    rotation_scale_matrix = obj_transform_copy[:3, :3]
+                    
+                    # Scale only the rotation/scale matrix, keep translation in meters
+                    # corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
+                    # corrected_transform[:3, 3] = translation 
+                    print(f" {obj_id}: Isaac Sim export - translation: {translation}")
 
-                
-                # Add reference to original USD file (this preserves ALL materials)
-                original_path = os.path.abspath(asset._fname)
-                references = obj_xform.GetPrim().GetReferences()
-                references.AddReference(original_path)
-                
-                # Add reference to original USD file (this preserves ALL materials)
-                original_path = os.path.abspath(asset._fname)
-                references = obj_xform.GetPrim().GetReferences()
-                references.AddReference(original_path)
-                
-                # add usd physics apis
-                try:
-                    # rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
-                    # rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                    # UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
-                    articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
-                    articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
-                except:
-                    print (f"Skip adding articulation API to object {obj_id}")
-                print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
+                    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
+                    root = original_stage.GetPseudoRoot()
+                    imageable = UsdGeom.Imageable(root)
+                    # Use Usd.TimeCode.Default() for the default time sample
+                    time = Usd.TimeCode.Default()
+                    # 'default' purpose is a common choice for general visibility
+                    bound = imageable.ComputeWorldBound(time, UsdGeom.Tokens.default_)
+                    bound_range = bound.GetRange()
+                    center = bound_range.GetMidpoint()
+                    # Compute the bounding box of the pseudo-root, which encompasses the entire stage
+                    object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
+                    print (f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
+                    translation -= np.array([center[0], center[1], center[2]]) * unit_scale_factor
+                    translation[2] += object_height / 2
+                    translation += env_translation
+                    
+                    # Create object prim under World
+                    obj_prim_path = f'/World/env_{env_id}/{obj_id}'
+                    obj_xform = UsdGeom.Xform.Define(stage, obj_prim_path)
+                    
+                    obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0], translation[1], translation[2]))
+                    obj_xform.AddScaleOp().Set(Gf.Vec3d(unit_scale_factor, unit_scale_factor, unit_scale_factor))
+                    r = Rotation.from_matrix(np.array(rotation_scale_matrix))
+                    euler_angles = r.as_euler('xyz', degrees=True)
+                    obj_xform.AddRotateXYZOp().Set(value=Gf.Vec3f(*euler_angles))
 
-                for prim in obj_xform.GetPrim().GetChildren():
-                    if prim.IsA(UsdPhysics.Joint):
-                        for joint_name in self.joint_states[obj_id]:
-                            if joint_name in str(prim.GetPath()):
-                                target_pos_attr = prim.GetAttribute("drive:linear:physics:targetPosition")
-                                target_pos_attr.Set(self.joint_states[obj_id][joint_name][env_id])
-                                break
-            
+                    
+                    # Add reference to original USD file (this preserves ALL materials)
+                    original_path = os.path.abspath(asset._fname)
+                    references = obj_xform.GetPrim().GetReferences()
+                    references.AddReference(original_path)
+                    
+                    # Add reference to original USD file (this preserves ALL materials)
+                    original_path = os.path.abspath(asset._fname)
+                    references = obj_xform.GetPrim().GetReferences()
+                    references.AddReference(original_path)
+                    
+                    # add usd physics apis
+                    try:
+                        # rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                        # rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                        # UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
+                        articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
+                        articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
+                    except:
+                        print (f"Skip adding articulation API to object {obj_id}")
+                    print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
+
+                    for prim in obj_xform.GetPrim().GetChildren():
+                        if prim.IsA(UsdPhysics.Joint):
+                            for joint_name in self.joint_states[obj_id]:
+                                if joint_name in str(prim.GetPath()):
+                                    target_pos_attr = prim.GetAttribute("drive:linear:physics:targetPosition")
+                                    target_pos_attr.Set(self.joint_states[obj_id][joint_name][env_id])
+                                    break
             # Save the stage
             stage.Save()
             print(f"USD scene exported for Isaac Sim with FULL material preservation to: {output_path}")
