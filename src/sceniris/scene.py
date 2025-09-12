@@ -1520,7 +1520,7 @@ class Scene(_Scene):
                 stage_bound = bbox_cache.ComputeWorldBound(root)
                 object_height = stage_bound.GetRange().GetSize()[2] * unit_scale_factor
 
-                # corrected_transform[2, 3] += object_height / 2
+                translation[2] += object_height / 2
                 
                 # Create object prim under World
                 obj_prim_path = f'/World/{obj_id}'
@@ -1549,7 +1549,7 @@ class Scene(_Scene):
                 transform_list = corrected_transform.flatten().astype(float).tolist()
                 transform_matrix = Gf.Matrix4d(*transform_list)
                 # obj_xform.MakeMatrixXform().Set(transform_matrix)
-                obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0] * unit_scale_factor, translation[1] * unit_scale_factor, translation[2] * unit_scale_factor))
+                obj_xform.AddTranslateOp().Set(Gf.Vec3d(translation[0], translation[1], translation[2]))
                 obj_xform.AddScaleOp().Set(Gf.Vec3d(unit_scale_factor, unit_scale_factor, unit_scale_factor))
                 r = Rotation.from_matrix(np.array(rotation_scale_matrix))
                 euler_angles = r.as_euler('xyz', degrees=True)
