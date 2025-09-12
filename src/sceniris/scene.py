@@ -1552,18 +1552,11 @@ class Scene(_Scene):
                 references = obj_xform.GetPrim().GetReferences()
                 references.AddReference(original_path)
                 
-                # Reference already added above
-                
-                # Add physics properties for Isaac Sim (optional but helpful)
-                # try:
-                #     # Make it a rigid body candidate
-                #     rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
-                #     UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
-                #     # Set as kinematic (won't fall due to gravity)
-                #     rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                # except:
-                #     print (f"Skip adding rigid and collsion API to object {obj_id}")
+                # add usd physics apis
                 try:
+                    rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                    rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                    UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
                     articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
                     articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
                 except:
