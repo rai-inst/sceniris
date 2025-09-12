@@ -1557,11 +1557,11 @@ class Scene(_Scene):
                 try:
                     # Make it a rigid body candidate
                     rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
+                    UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
                     # Set as kinematic (won't fall due to gravity)
                     rigid_body_api.CreateKinematicEnabledAttr().Set(True)
                 except:
-                    pass  # Physics API might not be available
-                
+                    print (f"Skip adding rigid and collsion API to object {obj_id}")                
                 print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
             
             # Save the stage
