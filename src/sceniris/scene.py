@@ -113,18 +113,18 @@ class Scene(_Scene):
         if self._reachability_checker is None:
             try:
                 from sceniris.simple_reachability_map import FastReachabilityChecker
-                print("Using FAST reachability checker (no PyBullet)")
+                logger.debug("Using FAST reachability checker (no PyBullet)")
                 self._reachability_checker = FastReachabilityChecker(use_gpu=True)
                
             except Exception as e:
-                print(f"Warning: Could not initialize fast reachability checker: {e}")
+                logger.warning(f"Warning: Could not initialize fast reachability checker: {e}")
                 # Fallback to original implementation
                 try:
                     from sceniris.reachability_checker import ReachabilityChecker
-                    print("Falling back to original reachability checker")
+                    logger.debug("Falling back to original reachability checker")
                     self._reachability_checker = ReachabilityChecker(use_gpu=True)
                 except Exception as e2:
-                    print(f"Warning: Could not initialize any reachability checker: {e2}")
+                    logger.warning(f"Warning: Could not initialize any reachability checker: {e2}")
                     self._reachability_checker = None
 
     def collision_check(
@@ -244,13 +244,13 @@ class Scene(_Scene):
             local_T = query_obj_pose @ local_T # (N, 4, 4) because query_obj_pose is (N, 4, 4)
 
             n_sph = N_SPH_BASE
-            # query_sph_approx = query_mesh.get_bounding_spheres(n_spheres=n_sph)
             n_sph = len(query_sph_approx)
             sph_pos = torch.stack([torch.tensor(s.position, dtype=torch.float32) for s in query_sph_approx], dim=0) # (n_sph, 3)
-            # print ("sph_pos z bound", sph_pos[:, 2].min(), sph_pos[:, 2].max())
 
             # -------------
             # TODO: <jshang> important note:
+            # This issue has been fixed, but we keep this note here for future reference:
+            # --
             # for some reason the spheres are using the center of the mesh as the origin, not the same as specified
             # in mesh (center, center, bottom). So an additional offset on z is needed to raise the spheres up
             # otherwise it always collides with the support surface
@@ -261,11 +261,8 @@ class Scene(_Scene):
             sph_pos_homo = sph_pos_homo.unsqueeze(0).unsqueeze(-1) # (1, n_sph, 4, 1)
             sph_pos_homo = local_T.unsqueeze(1) @ sph_pos_homo # (N, n_sph, 4, 1)
             sph_pos = sph_pos_homo[..., :3, 0] # (N, n_sph, 3)
-            # print ("sph_pos after local_T z bound", sph_pos[..., 2].min(), sph_pos[..., 2].max())
-            # sph_pos = sph_pos.unsqueeze(0) + local_T[:, :3, 3].unsqueeze(1)      # (N, n_sph, 3)
             sph_radius = torch.stack([torch.tensor([s.radius], dtype=torch.float32) for s in query_sph_approx], dim=0)\
                         .unsqueeze(0).repeat(len(env_ids), 1, 1)                 # (N, n_sph, 1)
-            # print (sph_pos.size(), sph_radius.size())
             sph = tensor_args.to_device(torch.cat([sph_pos, sph_radius], dim=2)) # (N, n_sph, 4)
             sph = sph.unsqueeze(1) # (N, horizon(1), n_sph, 4)
             mesh_spheres.append(sph)
@@ -274,8 +271,7 @@ class Scene(_Scene):
         mesh_spheres = torch.cat(mesh_spheres, dim=2) # (N, horizon, n_sph * n_parts, 4)
 
         end_perf_counter_prepare_query_obj = time.perf_counter()
-        print(f"Prepare query mesh curobo: {end_perf_counter_prepare_query_obj - start_perf_counter_prepare_query_obj:.4f}")
-
+        logger.info(f"Prepare query mesh curobo: {end_perf_counter_prepare_query_obj - start_perf_counter_prepare_query_obj:.4f}")
 
         start_perf_counter_query_curobo = time.perf_counter()
         # query curobo
@@ -292,7 +288,9 @@ class Scene(_Scene):
             mesh_spheres, collision_query_buffer, weight, act_distance, env_query_idx=env_query_idx
         )
         end_perf_counter_query_curobo = time.perf_counter()
-        print(f"Query curobo: {end_perf_counter_query_curobo - start_perf_counter_query_curobo:.4f}")
+        logger.info(f"Query curobo: {end_perf_counter_query_curobo - start_perf_counter_query_curobo:.4f}")
+
+        # if to visualize the collision spheres
         # for i in range(d.size(0)):
         #     colliding_mesh = mesh_spheres[i, 0, torch.nonzero(d[i, 0] > 0).flatten(), :3].cpu().numpy() #(n_colliding, 3)
         #     visualize_mesh(colliding_mesh, mesh_spheres[i, 0, :, :3].cpu().numpy())
@@ -415,7 +413,7 @@ class Scene(_Scene):
                 }
             # joint_value_ranges = np.concatenate(joint_value_ranges, axis=0) # (num_joints, 2)
             end_perf_counter_joint = time.perf_counter()
-            print(f"Prepare joint limits: {end_perf_counter_joint - start_perf_counter_joint:.4f}")
+            logger.info(f"Prepare joint limits: {end_perf_counter_joint - start_perf_counter_joint:.4f}")
 
             start_perf_counter_iter = time.perf_counter()
             iter = 0
@@ -500,7 +498,7 @@ class Scene(_Scene):
                 logger.debug(f"{obj_id} sampled pos, {pos3d}")
 
                 end_perf_counter_iter_sampling = time.perf_counter()
-                print(f"Iter sampling: {end_perf_counter_iter_sampling - start_perf_counter_iter_sampling:.4f}")
+                logger.info(f"Iter sampling: {end_perf_counter_iter_sampling - start_perf_counter_iter_sampling:.4f}")
 
                 start_perf_counter_iter_transform = time.perf_counter()
                 # Transform plane coordinates into scene coordinates
@@ -566,8 +564,7 @@ class Scene(_Scene):
                     placement_T[:, :3, :3] = face_to_ori[:, :3, :3]
                 logger.debug(f"world T, {world_T[..., :3, 3]}")
                 end_perf_counter_iter_transform = time.perf_counter()
-                print(f"Compute world transform: {end_perf_counter_iter_transform - start_perf_counter_iter_transform:.4f}")
-
+                logger.info(f"Compute world transform: {end_perf_counter_iter_transform - start_perf_counter_iter_transform:.4f}")
 
                 start_perf_counter_joint_update = time.perf_counter()
                 joint_values = []
@@ -593,7 +590,7 @@ class Scene(_Scene):
                         self.joint_states[obj_id][jid][working_env_ids] = joint_values[:, joint_idx]
 
                 end_perf_counter_joint_update = time.perf_counter()
-                print(f"Update joint states: {end_perf_counter_joint_update - start_perf_counter_joint_update:.4f}")
+                logger.info(f"Update joint states: {end_perf_counter_joint_update - start_perf_counter_joint_update:.4f}")
 
                 # Check custom validity function
                 # disable for now
@@ -603,7 +600,7 @@ class Scene(_Scene):
                 has_collision = self.collision_check(obj_id, obj_asset, world_T, env_ids=working_env_ids)
                 logger.debug(f"placing {obj_id} has collision, {has_collision.sum().item()}")
                 end_perf_counter_collision_check = time.perf_counter()
-                print(f"Collision check: {end_perf_counter_collision_check - start_perf_counter_collision_check:.4f}")
+                logger.info(f"Collision check: {end_perf_counter_collision_check - start_perf_counter_collision_check:.4f}")
 
                 # Check reachability
                 if check_reachability:
@@ -611,7 +608,7 @@ class Scene(_Scene):
                     cannot_reach = self.reachability_check(obj_id, world_T, env_ids=working_env_ids)
                     logger.debug(f"{cannot_reach.sum().item()} failed reachability check")
                     end_perf_counter_reachability_check = time.perf_counter()
-                    print(f"Reachability check: {end_perf_counter_reachability_check - start_perf_counter_reachability_check:.4f}")
+                    logger.info(f"Reachability check: {end_perf_counter_reachability_check - start_perf_counter_reachability_check:.4f}")
                 else:
                     cannot_reach = torch.zeros(len(working_env_ids), dtype=torch.bool)
                 
@@ -635,7 +632,7 @@ class Scene(_Scene):
                 self.edge_batch[edge_key].flags["WRITEABLE"] = False
 
                 end_perf_counter_update_info = time.perf_counter()
-                print(f"Update info: {end_perf_counter_update_info - start_perf_counter_update_info:.4f}")
+                logger.info(f"Update info: {end_perf_counter_update_info - start_perf_counter_update_info:.4f}")
 
                 env_ids = retry_env_ids
                 if len(env_ids) == 0:
@@ -650,7 +647,7 @@ class Scene(_Scene):
             logger.debug(f"Adding {obj_id} to {parent_id}")
 
             end_perf_counter_iter = time.perf_counter()
-            print(f"Place objects iter: {end_perf_counter_iter - start_perf_counter_iter:.4f}")
+            logger.info(f"Place objects iter: {end_perf_counter_iter - start_perf_counter_iter:.4f}")
             
             # use env0 transform to update trimesh scene
             trimesh_transform = self.edge_batch[edge_key][0] if len(self.edge_batch[edge_key].shape) == 3 else self.edge_batch[edge_key]
@@ -681,8 +678,7 @@ class Scene(_Scene):
             start_perf_counter_update_curobo = time.perf_counter()
             self._update_curobo_world_ccheck(update_transforms=True, update_enabled=True, update_obj_ids=[obj_id])
             end_perf_counter_update_curobo = time.perf_counter()
-            print(f"Update collision checker: {end_perf_counter_update_curobo - start_perf_counter_update_curobo:.4f}")
-            # print (f"update curobo world ccheck taken: {time.time() - st:.4f}s")
+            logger.info(f"Update collision checker: {end_perf_counter_update_curobo - start_perf_counter_update_curobo:.4f}")
 
         return env_ids.numpy()
     
@@ -729,8 +725,6 @@ class Scene(_Scene):
         if obj_orientation_iterator is None:
             obj_orientation_iterator = OrientationGeneratorUniformAroundZ(
                 seed=self._rng, replenish_size=self.num_envs*2)
-
-        print (obj_id, obj_orientation_iterator)
 
         env_obj_position_iterator = None
         if obj_position_iterator is None:
@@ -851,7 +845,6 @@ class Scene(_Scene):
         # update scene graph
         batch_forward_kinematics(self._scene, joint_names, configuration, edge_batch=self.edge_batch, env_ids=env_ids)
 
-    
     @classmethod
     def gen_from_cfg(cls, cfg: dict[str, Any], **kwargs):
         """Generate scene from cfg.
@@ -868,28 +861,28 @@ class Scene(_Scene):
         start_perf_counter = time.perf_counter()
         scene = cls.init_from_env_cfg(cfg)
         end_perf_counter = time.perf_counter()
-        print(f"Creat scene class: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Creat scene class: {end_perf_counter - start_perf_counter:.4f}")
 
         # initialize assets, gen tree, trimesh scene, and collision checker
         start_perf_counter = time.perf_counter()
         scene._load_assets()
         end_perf_counter = time.perf_counter()
-        print(f"Load assets: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Load assets: {end_perf_counter - start_perf_counter:.4f}")
 
         start_perf_counter = time.perf_counter()
         scene._build_gen_tree()
         end_perf_counter = time.perf_counter()
-        print(f"Build gen tree: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Build gen tree: {end_perf_counter - start_perf_counter:.4f}")
 
         start_perf_counter = time.perf_counter()
         scene._init_trimesh_scene()
         end_perf_counter = time.perf_counter()
-        print(f"Init trimesh scene: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Init trimesh scene: {end_perf_counter - start_perf_counter:.4f}")
 
         start_perf_counter = time.perf_counter()
         scene._init_collision_checker()
         end_perf_counter = time.perf_counter()
-        print(f"Init collision checker: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Init collision checker: {end_perf_counter - start_perf_counter:.4f}")
 
         return scene
 
@@ -911,7 +904,6 @@ class Scene(_Scene):
             
             self.assets_extents[obj_id] = asset_mesh.bounding_box_oriented.extents # width, depth, height (x,y,z)
         
-
     def _build_gen_tree(self) -> None:
         """Build a generation tree from cfg by topo sort. Objects will follow the order of the topo sort result, 
         in this case, generating from root node to leaf nodes."""
@@ -943,7 +935,6 @@ class Scene(_Scene):
         nodes = list(nx.topological_sort(simple_graph))
         nodes.remove("_plane")
         self._gen_node_order = nodes
-
 
     def _init_trimesh_scene(self) -> None:
         """
@@ -1040,10 +1031,10 @@ class Scene(_Scene):
         self._curobo_world_ccheck = WorldMeshCollision(self._curobo_world_coll_config)
         self._update_curobo_world_ccheck(update_transforms=False)
         end_perf_counter = time.perf_counter()
-        print(f"Make mesh buffer time: {make_mesh_buffer_time:.4f}")
-        print(f"Load mesh curobo time: {load_mesh_curobo_time:.4f}")
-        print(f"Make mesh approx time: {make_mesh_approx_time:.4f}")
-        print(f"Make cuRobo world configs: {end_perf_counter - start_perf_counter:.4f}")
+        logger.info(f"Make mesh buffer time: {make_mesh_buffer_time:.4f}")
+        logger.info(f"Load mesh curobo time: {load_mesh_curobo_time:.4f}")
+        logger.info(f"Make mesh approx time: {make_mesh_approx_time:.4f}")
+        logger.info(f"Make cuRobo world configs: {end_perf_counter - start_perf_counter:.4f}")
 
     def _update_curobo_world_ccheck(
         self, 
@@ -1115,7 +1106,7 @@ class Scene(_Scene):
             object_cfg = self._cfg["objects"][obj_id]
             placement_args = self._parse_obj_placement_cfg(object_cfg) 
             end_perf_counter_obj = time.perf_counter()
-            print(f"Parse obj placement cfg {obj_id}: {end_perf_counter_obj - start_perf_counter_obj:.4f}")
+            logger.info(f"Parse obj placement cfg {obj_id}: {end_perf_counter_obj - start_perf_counter_obj:.4f}")
             # placement_args: obj_position_iterator, obj_orientation_iterator, constraint, support_id, erosion_distance
 
             start_perf_counter_place = time.perf_counter()
@@ -1127,10 +1118,10 @@ class Scene(_Scene):
             )
             self.valid_env_mask[invalid_env_ids] = False
             end_perf_counter_place = time.perf_counter()
-            print(f"Place object {obj_id}: {end_perf_counter_place - start_perf_counter_place:.4f}")
+            logger.info(f"Place object {obj_id}: {end_perf_counter_place - start_perf_counter_place:.4f}")
         
         end_perf_counter_gen = time.perf_counter()
-        print(f"Gen scenes: {end_perf_counter_gen - start_perf_counter_gen:.4f}")
+        logger.info(f"Gen scenes: {end_perf_counter_gen - start_perf_counter_gen:.4f}")
 
     def export_scene_to_usd(
         self, 
@@ -1158,10 +1149,10 @@ class Scene(_Scene):
             )
             
             if all_usd:
-                print("All assets are USD files - using direct copy method for best material preservation")
+                logger.debug("All assets are USD files - using direct copy method for best material preservation")
                 self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
             else:
-                print("Mixed asset types - using reference method")
+                logger.debug("Mixed asset types - using reference method")
                 self._export_scene_to_usd_with_materials(env_id, output_path, include_joints)
         else:
             self._export_scene_to_usd_basic(env_id, output_path, include_joints)
@@ -1525,24 +1516,16 @@ class Scene(_Scene):
                     obj_transform_copy.flags["WRITEABLE"] = True
                     translation = obj_transform_copy[:3, 3] 
                     rotation_scale_matrix = obj_transform_copy[:3, :3]
-                    
-                    # Scale only the rotation/scale matrix, keep translation in meters
-                    # corrected_transform[:3, :3] = rotation_scale_matrix * unit_scale_factor
-                    # corrected_transform[:3, 3] = translation 
-                    print(f" {obj_id}: Isaac Sim export - translation: {translation}")
 
-                    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render'])
                     root = original_stage.GetPseudoRoot()
                     imageable = UsdGeom.Imageable(root)
-                    # Use Usd.TimeCode.Default() for the default time sample
                     time = Usd.TimeCode.Default()
-                    # 'default' purpose is a common choice for general visibility
                     bound = imageable.ComputeWorldBound(time, UsdGeom.Tokens.default_)
                     bound_range = bound.GetRange()
                     center = bound_range.GetMidpoint()
                     # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                     object_height = bound.GetRange().GetSize()[2] * unit_scale_factor
-                    print (f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
+                    logger.debug(f" {obj_id}: Isaac Sim export - object bound: {bound_range} center: {center}")
                     translation -= np.array([center[0], center[1], center[2]]) * unit_scale_factor
                     translation[2] += object_height / 2
                     translation += env_translation
@@ -1557,12 +1540,6 @@ class Scene(_Scene):
                     euler_angles = r.as_euler('xyz', degrees=True)
                     obj_xform.AddRotateXYZOp().Set(value=Gf.Vec3f(*euler_angles))
 
-                    
-                    # Add reference to original USD file (this preserves ALL materials)
-                    original_path = os.path.abspath(asset._fname)
-                    references = obj_xform.GetPrim().GetReferences()
-                    references.AddReference(original_path)
-                    
                     # Add reference to original USD file (this preserves ALL materials)
                     original_path = os.path.abspath(asset._fname)
                     references = obj_xform.GetPrim().GetReferences()
@@ -1570,9 +1547,6 @@ class Scene(_Scene):
                     
                     # add usd physics apis
                     try:
-                        # rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(obj_xform.GetPrim())
-                        # rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                        # UsdPhysics.CollisionAPI.Apply(obj_xform.GetPrim())
                         articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
                         articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
                     except:
