@@ -245,7 +245,6 @@ class Scene(_Scene):
         query_node_name_T_mesh_list = query_obj_asset.node_named_geometries(use_collision_geometry=True)
         default_mesh_folder = "/tmp/sgv2"
         make_mesh_buffer(query_obj_id, query_obj_asset, default_folder=default_mesh_folder)
-        N_SPH_BASE = 200
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
             fn = node_name.replace("object/", f"{query_obj_id}/") # triple _ to seperate obj_id and node_name
@@ -262,7 +261,7 @@ class Scene(_Scene):
             local_T = torch.from_numpy(local_T).to(torch.float32)
             local_T = query_obj_pose @ local_T # (N, 4, 4) because query_obj_pose is (N, 4, 4)
 
-            n_sph = N_SPH_BASE
+            n_sph = self.CUROBO_SPHERE_APPROX_N
             n_sph = len(query_sph_approx)
             sph_pos = torch.stack([torch.tensor(s.position, dtype=torch.float32) for s in query_sph_approx], dim=0) # (n_sph, 3)
 
