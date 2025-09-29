@@ -70,7 +70,7 @@ class Scene(_Scene):
         self, 
         num_envs: int = 128, 
         env_size: float = 1.0, 
-        robot_centric_frame_transforms = None, 
+        robot_centric_frame_transforms: str | NDArray = None, 
         collision_checker_backend: str = "curobo",
         tmp_mesh_file_folder: str = "/tmp/sceniris",
         workspace_limits: list[list[float]] | None = None,
@@ -78,35 +78,60 @@ class Scene(_Scene):
         *args, 
         **kwargs
     ):
+        """Initialize the Scene object.
+
+        Args:
+            num_envs (int, optional): number of environments. Defaults to 128.
+            env_size (float, optional): environment plane size. Defaults to 1.0.
+            robot_centric_frame_transforms (str | NDarray, optional): transform to the robot frame. 
+                Defaults to None. Not currently used.
+            collision_checker_backend (str, optional): backend of the collision checker. 
+                Defaults to "curobo" (requires GPU).
+            tmp_mesh_file_folder (str, optional): tmp folder for saving object meshes for curobo loading. 
+                Defaults to "/tmp/sceniris".
+            workspace_limits (list[list[float]] | None, optional): workspace limites for the robot. Defaults to None.
+            cfg (dict[str, Any], optional): sceniris scene generation configuration. Check `self.init_from_env_cfg`
+                and `self._parse_obj_placement_cfg` for configuration format. Defaults to None.
+        """
         super().__init__(*args, **kwargs)
         self._cfg = cfg
         if cfg is not None:
             if isinstance(cfg["objects"], list):
                 cfg["objects"] = {obj["id"]: obj for obj in cfg["objects"]}
+
+        # parameters
         self.usd_scene = None
-        self.obj_available_cache = {}
-        self.obj_pose_scenes = {}
         self.num_envs = num_envs
         self.env_size = env_size
         self.workspace_limits = workspace_limits
+        self.robot_centric_frame_transforms = robot_centric_frame_transforms
+        self.collision_checker_backend = collision_checker_backend
+        self.tmp_mesh_file_folder = tmp_mesh_file_folder
+
+        # curobo parameter
+        self.CUROBO_SPHERE_APPROX_N = 200
+        if "CUROBO_SPHERE_APPROX_N" in cfg:
+            self.CUROBO_SPHERE_APPROX_N = int(cfg["CUROBO_SPHERE_APPROX_N"])
+
+        # internal state and cache stuff
+        # self._no_relationship_scene = trimesh.Scene()
+        self._plane_asset = None
         self.assets = {}
         self.edge_batch = {}
         self.joint_states = defaultdict(dict) # dict: obj_id -> dict: joint_id (f"{obj_id}/{joint_name}") -> value
         self.cache = {}
         self._asset_mesh_cache = {}
-        self.isaac_env = None
-        self.robot_centric_frame_transforms = robot_centric_frame_transforms
-        self.collision_checker_backend = collision_checker_backend
-        self.tmp_mesh_file_folder = tmp_mesh_file_folder
+        self._all_constraints = []
+
+        # |---- curobo cache stuff
         self._object_enabled = {}
         self._all_mesh_names = defaultdict(list) # dict: obj_id -> mesh_names <list[str]>
         self.valid_env_mask = np.ones((self.num_envs,), dtype=np.bool_)
-        self._no_relationship_scene = trimesh.Scene()
-        self._plane_asset = None
         self._curobo_mesh_sphere_cache = {}
-        self.CUROBO_SPHERE_APPROX_N = 200
+
+        # reachability checker
         self._reachability_checker = None
-        self._all_constraints = []
+        
 
     def _init_reachability_checker(self):
         """Initialize the reachability checker if not already done."""
@@ -130,7 +155,7 @@ class Scene(_Scene):
     def collision_check(
         self, 
         query_obj_id: str, 
-        query_obj_asset, 
+        query_obj_asset: trimesh.Scene, 
         query_obj_T: NDArray, 
         env_ids: torch.Tensor | None = None,
         query_obj_joint_configs: dict[str, Any] | None = None
@@ -224,12 +249,6 @@ class Scene(_Scene):
         mesh_spheres = []
         for node_name, T, mesh in query_node_name_T_mesh_list:
             fn = node_name.replace("object/", f"{query_obj_id}/") # triple _ to seperate obj_id and node_name
-            # mesh_file_path = os.path.join(default_mesh_folder, f"{fn}.stl")
-            # query_mesh = Mesh(
-            #     name=node_name,
-            #     pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-            #     file_path=mesh_file_path,
-            # )
             query_sph_approx = self._curobo_mesh_sphere_cache[query_obj_id][fn]
 
             # mesh_height = mesh.bounds[1, 2] - mesh.bounds[0, 2]
@@ -299,10 +318,21 @@ class Scene(_Scene):
 
     def reachability_check(
         self,
-        obj_id,
-        world_T,
-        env_ids=None,
-    ):
+        obj_id: str,
+        world_T: NDArray,
+        env_ids: torch.Tensor | None = None,
+    )-> torch.Tensor:
+        """Check reachability of an object. Currently it only works for entire object (not parts).
+
+        Args:
+            obj_id (str): object id.
+            world_T (NDArray): world transform of object
+            env_ids (torch.Tensor | None, optional): environment ids. Defaults to None. Currently not used.
+
+        Returns:
+            torch.Tensor: tensor of shape (N,) where N is the number of environments. 
+                True means the object is reachable. False means the object is not reachable.
+        """
         if self._reachability_checker is None:
             self._init_reachability_checker()
                     
@@ -713,6 +743,10 @@ class Scene(_Scene):
             distance_above_support (float, optional): Distance the object mesh will be placed above the support surface. Defaults to 0.0.
             joint_type (str, optional): The type of joint that will be used to connect this object to the scene ("floating" or "fixed"). None has a similar effect as "fixed". Defaults to "floating".
             valid_placement_fn (function, optional): Function for testing valid placements. Defaults to returning True.
+            constraint (Constraint, optional): Constraint for placing the object. Defaults to None.
+            joint_states (dict[str, Any], optional): Joint states for the object. Defaults to None.
+            obj_position_iterator_xy_limit (list[list[float]], optional): XY limits for the object position iterator. Defaults to None.
+            erosion_distance (float, optional): Erosion distance for the object position iterator. Defaults to 0.02.
             **use_collision_geometry (bool, optional): Defaults to default_use_collision_geometry.
             **kwargs: Keyword arguments that will be delegated to add_object.
 
@@ -1047,8 +1081,8 @@ class Scene(_Scene):
         where `self._curobo_world_ccheck` is available.
 
         Args:
-            update_enabled (bool): Whether to update the enabled state of the objects.
-            update_transforms (bool): Whether to update the transforms of the objects.
+            update_enabled (bool): Whether to update the enabled state of the objects. Defaults to True.
+            update_transforms (bool): Whether to update the transforms of the objects. Defaults to True
             update_obj_ids (list[str]): The object ids to update. Defaults to [], will use all enabled objects.
             env_ids (NDArray, optional): The env ids to update. Defaults to None, updating all envs.
         """
@@ -1133,10 +1167,10 @@ class Scene(_Scene):
         """Export a specific environment scene to USD format with proper material preservation.
         
         Args:
-            env_id (int): Environment ID to export (must be valid)
-            output_path (str): Output USD file path
-            include_joints (bool): Whether to include joint states in the export
-            preserve_materials (bool): Whether to use material preservation methods
+            env_id (int): Environment ID to export (must be valid). Defaults to 0.
+            output_path (str): Output USD file path. Defaults to "exported_scene.usd".
+            include_joints (bool): Whether to include joint states in the export. Defaults to True.
+            preserve_materials (bool): Whether to use material preservation methods. Defaults to True.
         """
         if not self.valid_env_mask[env_id]:
             raise ValueError(f"Environment {env_id} is not valid")
@@ -1217,20 +1251,19 @@ class Scene(_Scene):
                     original_path = os.path.abspath(asset._fname)
                     references = obj_xform.GetPrim().GetReferences()
                     references.AddReference(original_path)
-                    print(f"Referenced original USD: {original_path}")
+                    logger.debug(f"Referenced original USD: {original_path}")
                 else:
-                    print(f"Warning: {obj_id} is not a USD asset, materials may not be preserved")
+                    logger.warning(f"Warning: {obj_id} is not a USD asset, materials may not be preserved")
             
             # Save the stage
             stage.Save()
             print(f"USD scene exported with materials to: {output_path}")
             
         except ImportError:
-            print("Warning: USD Python bindings not available, falling back to basic export")
+            logger.warning("Warning: USD Python bindings not available, falling back to basic export")
             self._export_scene_to_usd_basic(env_id, output_path, include_joints)
         except Exception as e:
-            print(f"Error in USD export with materials: {e}")
-            print("Falling back to basic export")
+            logger.error(f"Error in USD export with materials: {e}, Falling back to basic export")
             self._export_scene_to_usd_basic(env_id, output_path, include_joints)
     
     def _export_scene_to_usd_basic(
@@ -1294,7 +1327,7 @@ class Scene(_Scene):
                 texture_dir="textures",  # Organize textures in subdirectory
                 include_light_nodes=True  # Include lighting information
             )
-            print(f"Scene exported to USD: {output_path}")
+            logger.info(f"Scene exported to USD: {output_path}")
             
         finally:
             # Restore original transforms
@@ -1350,7 +1383,7 @@ class Scene(_Scene):
                 
                 # Only handle USD assets with this method
                 if not (hasattr(asset, '_fname') and asset._fname.endswith('.usd')):
-                    print(f"Warning: {obj_id} is not a USD asset, skipping direct copy method")
+                    logger.warning(f"Warning: {obj_id} is not a USD asset, skipping direct copy method")
                     continue
                 
                 # Read the original USD units to determine the correct scale
@@ -1364,9 +1397,9 @@ class Scene(_Scene):
                     # Compute the bounding box of the pseudo-root, which encompasses the entire stage
                     stage_bound = bbox_cache.ComputeWorldBound(root)
                     object_height = stage_bound.GetBox().size[2]
-                    print(f"{obj_id}: Original metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
+                    logger.debug(f"{obj_id}: Original metersPerUnit={original_meters_per_unit}, scale factor={unit_scale_factor}")
                 else:
-                    print(f"Warning: Could not read USD metadata for {obj_id}, using default scale")
+                    logger.warning(f"Warning: Could not read USD metadata for {obj_id}, using default scale")
                     unit_scale_factor = 0.01  # Default for problematic files
                     object_height = None
                 
@@ -1550,7 +1583,7 @@ class Scene(_Scene):
                         articulation_api = UsdPhysics.ArticulationRootAPI.Apply(obj_xform.GetPrim())
                         articulation_api.CreatePhysicsSceneRel().SetTargets([Sdf.Path(physics_scene_path)])
                     except:
-                        print (f"Skip adding articulation API to object {obj_id}")
+                        logger.warning(f"Skip adding articulation API to object {obj_id}")
                     print(f"Isaac Sim: Referenced {obj_id} with unit-aware scale ({unit_scale_factor}): {original_path}")
 
                     for prim in obj_xform.GetPrim().GetChildren():
@@ -1565,12 +1598,10 @@ class Scene(_Scene):
             print(f"USD scene exported for Isaac Sim with FULL material preservation to: {output_path}")
             
         except ImportError as e:
-            print(f"Warning: USD Python bindings not available for Isaac Sim export: {e}")
-            print("Falling back to direct copy method")
+            logger.warning(f"Warning: USD Python bindings not available for Isaac Sim export: {e}, falling back to direct copy method")
             self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
         except Exception as e:
-            print(f"Error in Isaac Sim USD export: {e}")
-            print("Falling back to direct copy method")
+            print(f"Error in Isaac Sim USD export: {e}, falling back to direct copy method")
             self.export_scene_to_usd_direct_copy(env_id, output_path, include_joints)
 
     def export_scene_to_poses_and_joint_states(
@@ -1838,15 +1869,21 @@ class Scene(_Scene):
         extruded_polygon_height=1e-3,
     ):
         """Show labelled supports in trimesh viewer, optionally on top of scene.
+        *Overrides the original function in scene_synthesizer.scene.Scene.show_supports*
 
         Note: If only supports need to be shown, use argument `layers=['support']`.
 
         Args:
-            support_id_query (str or list or regex, optional): A string, list, or regular expression that refers to support IDs. None means all supports. Defaults to None.
-            layers (list[str], optional): A list of visible layer names. If None everything will be visible. Defaults to None.
-            color (list[int], optional): An RGBA value used to color the supports. If None, random color is chosen. Defaults to None.
-            use_path_geometry (bool, optional): Whether to use a trimesh.path.Path3D or an extruded polygon (trimesh.Trimesh) as geometry. Defaults to False (trimesh.Trimesh).
-            extruded_polygon_height (bool, optional): If `use_path_geometry=False` this defines the height of the extrusion. Defaults to 1e-3.
+            support_id_query (str or list or regex, optional): A string, list, or regular expression that refers to support IDs. 
+                None means all supports. Defaults to None.
+            layers (list[str], optional): A list of visible layer names. If None everything will be visible. 
+                Defaults to None.
+            color (list[int], optional): An RGBA value used to color the supports. If None, random color is chosen. 
+                Defaults to None.
+            use_path_geometry (bool, optional): Whether to use a trimesh.path.Path3D or an extruded polygon 
+                (trimesh.Trimesh) as geometry. Defaults to False (trimesh.Trimesh).
+            extruded_polygon_height (bool, optional): If `use_path_geometry=False` this defines the height of 
+                the extrusion. Defaults to 1e-3.
         """
         if support_id_query is None:
             for i, constraint in enumerate(self._all_constraints):
@@ -1870,6 +1907,7 @@ class Scene(_Scene):
 
     def show(self, layers=None, other_scene=None, env_ids: NDArray[np.int32] | None = None, enable_viewer=True):
         """Show scene using the trimesh viewer.
+        *Overrides the original function in scene_synthesizer.scene.Scene.show*
 
         Args:
             layers (list[str], optional): Filter to show only certain layers, e.g. 'visual' or 'collision'. 
@@ -2011,6 +2049,7 @@ class Scene(_Scene):
         **kwargs,
     ):
         """Gives one or multiple support areas in the scene a string identifier which can be used for e.g. placement.
+        *Overrides the original function in scene_synthesizer.scene.Scene.label_support*
 
         Args:
             label (str): String identifier.
@@ -2085,6 +2124,7 @@ class Scene(_Scene):
         **kwargs,
     ):
         """Creates support polyhedra which are volumes created by extruding support polygons until collision.
+        *Overrides the original function in scene_synthesizer.scene.Scene._get_support_polyhedra*.
 
         Args:
             min_volume (float, optional): Only return polyhedra with volume greater than this minimum. Defaults to 0.000001.
@@ -2154,8 +2194,8 @@ class Scene(_Scene):
                 erosion_distance=erosion_distance,
                 # debug=True
             )
-            # print (f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
             logger.debug(f"{support_surface.node_name} is_support_polyhedra {is_support_polyhedra}")
+
             if is_support_polyhedra:
                 support_polyhedra.append(
                     Container(
@@ -2188,7 +2228,8 @@ class Scene(_Scene):
         **kwargs,
     ):
         """
-        Modify original _compute_support_polyhedra to fix bugs.
+        *Overrides the original function in scene_synthesizer.scene.Scene._compute_support_polyhedra
+        to fix bugs and tune the parameters.*
         """
         origins, intersections = self._raycast_surface(
             support_surface=support_surface,

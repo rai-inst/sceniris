@@ -116,7 +116,7 @@ def sample_random_z_rotations(
     
     return rotation_matrices
 
-def point_to_translation_matrix(translations):
+def point_to_translation_matrix(translations: NDArray) -> NDArray:
     """
     Creates a batch of 4x4 translation matrices from a batch of 3D coordinates.
 
@@ -125,7 +125,7 @@ def point_to_translation_matrix(translations):
                     and each row represents the (x, y, z) translation vector.
 
     Returns:
-        A NumPy array of shape (N, 4, 4) containing the translation matrices.
+        NDArray: A NumPy array of shape (N, 4, 4) containing the translation matrices.
     """
     N = translations.shape[0]
     matrices = np.tile(np.eye(4, dtype=translations.dtype), (N, 1, 1))
@@ -133,29 +133,73 @@ def point_to_translation_matrix(translations):
     return matrices
 
 
-def check_within_polygon(polygon, points: NDArray):
-    """Check if points are within a polygon."""
+def check_within_polygon(polygon: Polygon, points: NDArray) -> NDArray:
+    """
+    Check if points are within a polygon.
+
+    Args:
+        polygon (Polygon): the polygon to check.
+        points (NDArray): the points to check.
+
+    Returns:
+        NDArray: the boolean mask of the points that are within the polygon. Shape (N,).
+    """
     mask = vectorized.contains(polygon, *points.T)
     return mask
 
 
-def get_support_transforms(supports: list[SupportSurface]):
-    """Get the transform of a support polygon."""
+def get_support_transforms(supports: list[SupportSurface]) -> NDArray:
+    """
+    Get the transform of a  list of support polygons.
+    
+    Args:
+        supports (list[SupportSurface]): the list of support surfaces.
+
+    Returns:
+        NDArray: the transforms of the support surfaces. Shape (N, 4, 4).
+    """
     return np.concatenate([s.transform[np.newaxis, :, :] for s in supports])
 
 
-def get_support_node_transforms(scene, supports: list[SupportSurface]):
-    """Get the transform of a support polygon."""
+def get_support_node_transforms(scene, supports: list[SupportSurface]) -> NDArray:
+    """
+    Get the transforms of a list of nodes of support polygons.
+
+    Args:
+        scene (trimesh.Scene): the scene.
+        supports (list[SupportSurface]): the list of support surfaces.
+
+    Returns:
+        NDArray: the transforms of the support nodes. Shape (N, 4, 4).
+    """
     return np.concatenate([
         scene.graph.get(s.node_name)[0][np.newaxis, :, :] for s in supports])
 
-def get_support_node_names(supports: list[SupportSurface]):
-    """Get the node name of a support polygon."""
+def get_support_node_names(supports: list[SupportSurface]) -> NDArray:
+    """
+    Get the node name of a list of support polygons.
+
+    Args:
+        supports (list[SupportSurface]): the list of support surfaces.
+
+    Returns:
+        NDArray: the node names of the support surfaces. Shape (N,).
+    """
     return np.array([s.node_name for s in supports])
 
 
-def get_transform_batch(scene, frame_tos: list[str], frame_from: str | None = None):
-    """Get the transform of a batch of objects."""
+def get_transform_batch(scene, frame_tos: list[str], frame_from: str | None = None) -> NDArray:
+    """
+    Get the transform of a batch of objects.
+
+    Args:
+        scene (trimesh.Scene): the scene.
+        frame_tos (list[str]): the list of frame tos.
+        frame_from (str | None, optional): the frame from. Defaults to None.
+
+    Returns:
+        NDArray: the transforms of the objects. Shape (N, 4, 4).
+    """
     res = np.zeros((len(frame_tos), 4, 4))
     unique_frame_tos = np.unique(frame_tos)
     for frame_to in unique_frame_tos:
@@ -169,9 +213,16 @@ def get_transform_batch(scene, frame_tos: list[str], frame_from: str | None = No
     return res
 
 
-def homogeneous_inv_batch(matrices):
-    """Inverse homogeneous matrix.
+def homogeneous_inv_batch(matrices: NDArray) -> NDArray:
+    """
+    Batch inverse homogeneous matrix.
     Slightly faster than np.linalg.inv or trimesh.transformations.inverse_matrix.
+
+    Args:
+        matrices (NDArray): the matrices to inverse. Shape (N, 4, 4).
+
+    Returns:
+        NDArray: the inverse of the matrices. Shape (N, 4, 4).
     """
     # return np.linalg.inv(matrices)
     if len(matrices.shape) == 2:
@@ -301,9 +352,15 @@ def scene_graph_transform_get(
     return matrix, geometry
 
 
-def batched_multi_dot(matrices):
+def batched_multi_dot(matrices: list[NDArray]) -> NDArray:
     """
     Batched matrix multiplication.
+
+    Args:
+        matrices (list[NDArray]): the matrices to multiply. Shape (N, 4, 4).
+
+    Returns:
+        NDArray: the result of the matrix multiplication. Shape (N, 4, 4).
     """
     if len(matrices) == 1:
         return matrices[0]
@@ -314,7 +371,19 @@ def batched_multi_dot(matrices):
         return res
 
 
-def make_mesh_buffer(obj_id: str, obj_asset, io_buf=False, default_folder="/tmp/sgv2"):
+def make_mesh_buffer(obj_id: str, obj_asset, io_buf=False, default_folder="/tmp/sgv2") -> list[str]:
+    """
+    Make buffers for object meshes.
+
+    Args:
+        obj_id (str): object id
+        obj_asset (_type_): object asset
+        io_buf (bool, optional): whether to use io.BytesIO. Defaults to False.
+        default_folder (str, optional): if using file, the folder to save the mesh files. Defaults to "/tmp/sgv2".
+
+    Returns:
+        list[str]: the paths of the mesh files.
+    """
     # asset_mesh = obj_asset.mesh(use_collision_geometry=True)
     node_name_T_mesh_list = obj_asset.node_named_geometries(use_collision_geometry=True)
     paths = []
@@ -333,7 +402,7 @@ def make_mesh_buffer(obj_id: str, obj_asset, io_buf=False, default_folder="/tmp/
     return paths
 
 
-def transform_matrix_to_vectors(matrix):
+def transform_matrix_to_vectors(matrix: NDArray) -> tuple[NDArray, NDArray]:
     """
     Converts a 4x4 transformation matrix to a translation vector and a quaternion.
 
@@ -341,7 +410,7 @@ def transform_matrix_to_vectors(matrix):
         matrix: A 4x4 numpy array representing the transformation.
 
     Returns:
-        A tuple containing:
+        A tuple(NDArray, NDArray) containing:
         - translation (numpy.ndarray): A 3-element numpy array for the translation (x, y, z).
         - quaternion (numpy.ndarray): A 4-element numpy array for the quaternion (x, y, z, w).
     """
@@ -366,7 +435,17 @@ def transform_matrix_to_vectors(matrix):
 
     return translation, quaternion
 
-def batch_transform_matrix_to_vectors(matrices, wxyz=True):
+def batch_transform_matrix_to_vectors(matrices: NDArray, wxyz: bool = True) -> tuple[NDArray, NDArray]:
+    """
+    Batch transform matrix to vectors.
+
+    Args:
+        matrices (NDArray): the matrices to convert. Shape (N, 4, 4).
+        wxyz (bool, optional): whether to use wxyz order. Defaults to True.
+
+    Returns:
+        tuple[NDArray, NDArray]: the translation and quaternion. Shape (N, 3) and (N, 4).
+    """
     pos = matrices[..., :3, 3].copy()
     pos.flags["WRITEABLE"] = True
     r = matrices[..., :3, :3].copy()
@@ -376,13 +455,18 @@ def batch_transform_matrix_to_vectors(matrices, wxyz=True):
         quat = quat[..., [3, 0, 1, 2]]
     return pos, quat
 
-def batch_forward_kinematics(scene, joint_names=None, configuration=None, edge_batch=None, env_ids=None):
-    """Helper function to update the scene graph by running forward kinematics on all edges specified through joint_names.
+def batch_forward_kinematics(scene, joint_names=None, configuration=None, edge_batch=None, env_ids=None) -> None:
+    """
+    Helper function to update the scene graph by running forward kinematics on all edges 
+    specified through joint_names.
 
     Args:
         scene (trimesh.Scene): Scene.
         joint_names (list[str], optional): Names of joints to update. If None, use all joints. Defaults to None.
-        configuration (list[NDArray], optional): Configurations. Needs to be same size as joint_names or None. If None will use configuration stored in graph. Defaults to None.
+        configuration (list[NDArray], optional): Configurations. Needs to be same size as joint_names or None. 
+            If None will use configuration stored in graph. Defaults to None.
+        edge_batch (dict, optional): Edge batch cache. Defaults to None -- not using cache.
+        env_ids (list[int], optional): Environment ids. Defaults to None.
     """
     if configuration is not None and joint_names is not None:
         if len(configuration.shape) == 1:
@@ -459,7 +543,7 @@ def batch_forward_kinematics(scene, joint_names=None, configuration=None, edge_b
     invalidate_scenegraph_cache(scene)
 
 
-def invalidate_scenegraph_cache(scene):
+def invalidate_scenegraph_cache(scene) -> None:
     """Invalidate cache of scene's graph.
 
     Args:
@@ -633,26 +717,6 @@ def signed_angle(v1: NDArray, v2: NDArray):
     
     return angle
 
-
-ROT_2D_45 = np.array(
-    [[np.cos(np.pi/4), -np.sin(np.pi/4)],
-    [np.sin(np.pi/4), np.cos(np.pi/4)]]
-)
-
-ROT_2D_90 = np.array(
-    [[0, -1],
-    [1, 0]]
-)
-
-ROT_2D_270 = np.array(
-    [[0, 1],
-    [-1, 0]]
-)
-
-ROT_2D_315 = np.array(
-    [[np.cos(7*np.pi/4), -np.sin(7*np.pi/4)],
-    [np.sin(7*np.pi/4), np.cos(7*np.pi/4)]]
-)
 
 def angle_to_2d_rotation_matrix(angle: float) -> NDArray:
     """Convert an angle to a 2D rotation matrix.
