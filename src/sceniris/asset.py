@@ -164,7 +164,15 @@ class Asset(_Asset):
         self._node_name_T_mesh_list = node_name_T_mesh_list
         return self._node_name_T_mesh_list
 
-    def mesh(self, use_collision_geometry=False):
+    def mesh(self, use_collision_geometry=False) -> trimesh.Trimesh:
+        """Consolidate the asset's meshes into a single mesh
+
+        Args:
+            use_collision_geometry (bool, optional): whether to use collision geometry. Defaults to False.
+
+        Returns:
+            trimesh.Trimesh: the combined mesh.
+        """
         if hasattr(self, "_combined_mesh") and self._combined_mesh is not None:
             return self._combined_mesh
         
