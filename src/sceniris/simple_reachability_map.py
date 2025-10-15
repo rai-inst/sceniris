@@ -1,7 +1,4 @@
-"""
-Simple, standalone reachability map for fast lookup operations.
-No PyBullet or simulation dependencies - just pure numpy/torch lookups.
-"""
+# Copyright (c) 2025 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
 
 import numpy as np
 import torch

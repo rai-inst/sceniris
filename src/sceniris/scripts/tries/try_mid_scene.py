@@ -1,3 +1,5 @@
+# Copyright (c) 2025 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
+
 from argparse import ArgumentParser
 import os
 import numpy as np
@@ -5,7 +7,6 @@ import numpy as np
 import time
 from multiprocessing import Pool
 import psutil
-
 
 from sceniris.constraints import SurfaceRelation, TrackingTransform
 

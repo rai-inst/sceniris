@@ -1,3 +1,5 @@
+# Copyright (c) 2025 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
+
 from trimesh.scene.transforms import SceneGraph
 import trimesh.transformations as tra
 import io

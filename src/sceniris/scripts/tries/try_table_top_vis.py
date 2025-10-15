@@ -1,10 +1,9 @@
+# Copyright (c) 2025 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
+
 from sceniris.scene import Scene
 import os
 import numpy as np
-import logging
 from argparse import ArgumentParser
-# logger = logging.getLogger("scene_synthesizer") # Get a logger instance
-# logger.setLevel(logging.DEBUG)
 
 parser = ArgumentParser()
 parser.add_argument("--use_original_ss", action="store_true")
