@@ -4,7 +4,7 @@ Sceniris is a procedural scene generation framework that generates a massive amo
 
 ### Installation
 
-1. Install [curobo](https://curobo.org/get_started/1_install_instructions.html)
+1. Install [curobo](https://curobo.org/get_started/1_install_instructions.html). Note: before installing `curobo`, make sure you have `pyTorch` installed under the same cuda version of your system (can be checked by `nvcc -V`).
 2. Install sceniris `pip install git+https://github.com/bdaiinstitute/sceniris.git`. You may need to review the [licence terms](https://github.com/NVlabs/scene_synthesizer?tab=readme-ov-file#installation) mentioned in scene_synthesizer
 3. [Optional] if you want to deal with USD assets but there is no OpenUSD installed, `pip install usd-core`
 
