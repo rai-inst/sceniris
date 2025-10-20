@@ -12,6 +12,9 @@ Sceniris is a procedural scene generation framework that generates a massive amo
 - From config
 ```
 from sceniris.scene import Scene
+import os
+import logging
+logging.basicConfig(level=logging.INFO, force=True)
 # give a config
 cfg = {
     "env": {
