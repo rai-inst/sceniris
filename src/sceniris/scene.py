@@ -112,8 +112,9 @@ class Scene(_Scene):
 
         # curobo parameter
         self.CUROBO_SPHERE_APPROX_N = 200
-        if "CUROBO_SPHERE_APPROX_N" in cfg:
-            self.CUROBO_SPHERE_APPROX_N = int(cfg["CUROBO_SPHERE_APPROX_N"])
+        if cfg is not None:
+            if "CUROBO_SPHERE_APPROX_N" in cfg:
+                self.CUROBO_SPHERE_APPROX_N = int(cfg["CUROBO_SPHERE_APPROX_N"])
 
         # internal state and cache stuff
         # self._no_relationship_scene = trimesh.Scene()
