@@ -70,14 +70,15 @@ class Asset(_Asset):
 
     def sample_stable_pose(
         self, 
-        seed = None, 
-        num_samples: int =1, 
-        z_rotation: bool=True,
+        seed: int | None = None, 
+        num_samples: int = 1, 
+        z_rotation: bool = True,
         **kwargs
     ) -> NDArray:
-        """Return a stable pose according to their likelihood.
+        """Return a stable pose according to the likelihood of the stable poses.
 
-        seed (int, numpy.random._generator.Generator, optional): A seed or random number generator. Defaults to None which creates a new default random number generator.
+        seed (int | None): A seed or random number generator. 
+            Defaults to None which creates a new default random number generator.
         num_samples (int): The number of samples to return.
         z_rotation (bool): Whether to rotate the poses around the z-axis.
         **kwargs: Additional arguments to pass to the `compute_stable_poses` method.
@@ -209,10 +210,10 @@ class MeshAsset(Asset, _MeshAsset):
 class PlaneAsset(_TrimeshAsset):
     def __init__(
         self,
-        width=1,
-        depth=1,
-        normal=(0, 0, 1),
-        center=(0, 0, 0),
+        width: float = 1,
+        depth: float = 1,
+        normal: tuple[float, float, float] = (0, 0, 1),
+        center: tuple[float, float, float] = (0, 0, 0),
     ):
         """An asset representing a plane. Can be used to model a ground plane, often used in simulators.
 

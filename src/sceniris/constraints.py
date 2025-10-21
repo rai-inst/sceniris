@@ -475,6 +475,9 @@ class SurfaceRelation:
                                 polygon,
                                 self.base_support[surface_idx],
                             )
+            
+            # TODO: finish next_to case after making the object to be 
+            # TODO: process with connect point
             # elif isinstance(self.direction, str) and self.direction == "next_to":
             #     # case that the direction is next to the anchor
             #     assert len(self.anchor_transforms) == 1, "Only one anchor is allowed when direction is next_to"
@@ -512,8 +515,6 @@ class SurfaceRelation:
             #         direction = np.tile(direction, (self.num_envs, 1, 1))
             #     direction = direction[..., :2, :]
 
-                # TODO: finish next_to case after making the object to be 
-                # TODO: process with connect point
         self._scene_supports = scene_support_surfaces
         return scene_support_surfaces
     
