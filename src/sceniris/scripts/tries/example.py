@@ -5,6 +5,9 @@ import os
 import numpy as np
 from argparse import ArgumentParser
 
+abs_current_dir = os.path.dirname(os.path.abspath(__file__))
+example_asset_dir = os.path.join(os.path.dirname(os.path.dirname(abs_current_dir)), "example_assets")
+
 parser = ArgumentParser()
 parser.add_argument("--use_original_ss", action="store_true")
 parser.add_argument("--visualize", action="store_true")
@@ -13,7 +16,6 @@ parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--env_size", type=float, default=1.0)
 parser.add_argument("--benchmark_dir", type=str, default="benchmark")
 parser.add_argument("--distance_start_bbox", action="store_true")
-parser.add_argument("--cfg_level", type=str, default="mid", choices=["mid", "hard"])
 args = parser.parse_args()
 
 """
@@ -48,7 +50,7 @@ args = parser.parse_args()
 }
 """
 
-mid_cfg = {
+cfg = {
     "env": {
         "num_envs": args.num_envs,
         "env_size": args.env_size,
@@ -56,23 +58,12 @@ mid_cfg = {
     "objects": [
         {
             "id": "apple",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/013_apple/textured/textured.usd"),
+            "asset_path": os.path.join(example_asset_dir, "apple.usd"),
             'reachable': True,
-            # "position": {
-            #     "xy_limit": [[0.2, 0.2], [0.8, 0.8]],  # Use fractions: 10%-90% of support surface
-            #     "z_limit": [0.0, 0.5],
-            # },
-            # "constraints": [
-            #     {
-            #         "anchor_object_ids": ["drawer", "banana"],
-            #         "direction": "middle",
-            #         "distance_start_bbox": args.distance_start_bbox,
-            #     }
-            # ]
         },
         {
             "id": "drawer",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/usd/unit_1/unit_1.usd"),
+            "asset_path": os.path.join(example_asset_dir, "drawer_unit_1.usd"),
             "joint_states": [
                 {
                     "joint_ids": ["drawer_joint_lower"],
@@ -90,49 +81,22 @@ mid_cfg = {
         },
         {
             "id": "banana",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/011_banana/textured/textured.usd"),
+            "asset_path": os.path.join(example_asset_dir, "banana.usd"),
             "parent_id": "drawer/unit_1_upper_drawer", # might need to optimize the part name in trimesh scene
             "relation_to_parent": "top",
             "reachable": True,
         },
-        # {
-        #     "id": "banana",
-        #     "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/011_banana/textured/textured.usd"),
-        #     "constraints": [
-        #         {
-        #             "anchor_object_ids": ["drawer"],
-        #             "distance": 0.1,
-        #             "distance_type": "greater",
-        #             "relation_axis_transform": "drawer",
-        #             "max_mesh_projection_z": 0.1,
-        #             "distance_start_bbox": args.distance_start_bbox,
-        #         }
-        #     ]
-        # },
     ]
 }
 
 
-
-
-if args.cfg_level == "hard":
-    cfg = hard_cfg
-elif args.cfg_level == "mid":
-    cfg = mid_cfg
-else:
-    raise ValueError(f"Invalid cfg level: {args.cfg_level}")
-
-
 cfg["env"].update({
     "num_envs": args.num_envs,
-    # "env_size": args.env_size,
 })
 if "env_size" not in cfg["env"]:
     cfg["env"]["env_size"] = args.env_size
 
-# args.cfg_level = "kitchen_config_2"
-# args.distance_start_bbox = True
-REPEAT = 5 # 5
+REPEAT = 5
 
 benchmark_dir = os.path.join(args.benchmark_dir, args.cfg_level)
 if args.distance_start_bbox:
@@ -161,10 +125,8 @@ for i in range(REPEAT):
     f.write(f"{i+1}\t{time_taken:.4f}\t{args.num_envs - int(scene.valid_env_mask.sum())}\n")
 f.close()
 
-# find valid env_ids
 valid_env_ids = np.where(scene.valid_env_mask)[0]
 
 if args.visualize:
-    # scene.show_supports()
-    # scene.show_graph()
-    scene.show(env_ids=valid_env_ids[:4] )
+    # scene.show_supports() # show the support surface in one scene instance
+    scene.show(env_ids=valid_env_ids[:min(args.num_envs, 4)])

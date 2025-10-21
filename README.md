@@ -1,12 +1,13 @@
 ## Sceniris: a fast procedural scene generation framework
-Sceniris is a procedural scene generation framework that generates a massive amount of collision-free environment instances in a short time. [How fast?](#how-fast-is-sceniris). The framework is developed on top of [scene_syntheizer](https://github.com/NVlabs/scene_synthesizer) and [curobo](https://curobo.org/). Sceniris also supports more spatial relationships than scene_synthesizer. The speedup mainly comes from three aspects: batched sampling, batched pose computation & forward kinematics, and curobo's parallel collision checking.
+Sceniris is a procedural scene generation framework that generates a massive amount of collision-free environment instances in a short time. [How fast?](#how-fast-is-sceniris). The framework is developed on top of [scene_synthesizer](https://github.com/NVlabs/scene_synthesizer) and [curobo](https://curobo.org/). Sceniris also supports more spatial relationships than scene_synthesizer. The speedup mainly comes from three aspects: batched sampling, batched pose computation & forward kinematics, and curobo's parallel collision checking.
 
 
 ### Installation
 
-1. Install [curobo](https://curobo.org/get_started/1_install_instructions.html). Note: before installing `curobo`, make sure you have `pyTorch` installed under the same cuda version of your system (can be checked by `nvcc -V`).
-2. Install sceniris `pip install git+https://github.com/bdaiinstitute/sceniris.git`. You may need to review the [licence terms](https://github.com/NVlabs/scene_synthesizer?tab=readme-ov-file#installation) mentioned in scene_synthesizer
+1. Install [curobo](https://curobo.org/get_started/1_install_instructions.html#library-installation). Note: before installing `curobo`, make sure you have `pyTorch` installed under the same cuda version of your system (can be checked by `nvcc -V`).
+2. Install sceniris `pip install git+https://github.com/bdaiinstitute/sceniris.git`. You may need to review the [licence terms](https://github.com/NVlabs/scene_synthesizer?tab=readme-ov-file#installation) mentioned in scene_synthesizer, and the [licence] of [curobo](https://github.com/nvlabs/curobo?tab=License-1-ov-file)
 3. [Optional] if you want to deal with USD assets but there is no OpenUSD installed, `pip install usd-core`
+4. [Optional] if you wang to use the robot reachability feature, run `git submodule update --init --recursive` to pull `rm4d`
 
 ### Usage
 - From config
@@ -91,3 +92,6 @@ Scene_synthesizer (with 10 multiprocessing): **64** env instances in around 38 s
 
 ### Acknowledgement
 [scene_synthesizer](https://github.com/NVlabs/scene_synthesizer), [curobo](https://curobo.org/)
+
+### Maintainance Disclaimer
+The project will be under light maintenance. No feature development guaranteed. We welcome any bug reports or PRs help us to improve the project.
