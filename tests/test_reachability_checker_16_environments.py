@@ -4,10 +4,6 @@ import sys
 import time
 from typing import List, Tuple
 
-# Add paths
-sys.path.append('/home/rgong/Desktop/rm4d')
-sys.path.append('/home/rgong/Desktop/sceniris/src')
-
 from sceniris.reachability_checker import ReachabilityChecker
 
 

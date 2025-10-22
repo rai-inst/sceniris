@@ -42,7 +42,6 @@ This test suite provides comprehensive testing of the `ReachabilityChecker` clas
 
 ### Execute Tests
 ```bash
-cd /home/rgong/Desktop/sceniris
 python tests/test_reachability_checker_16_environments.py
 ```
 

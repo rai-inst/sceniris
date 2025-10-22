@@ -206,7 +206,7 @@ def homogeneous_inv_batch(matrices: NDArray) -> NDArray:
     Slightly faster than np.linalg.inv or trimesh.transformations.inverse_matrix.
 
     Args:
-        matrices (NDArray): the matrices to inverse. Shape (N, 4, 4).
+        matrices (NDArray): the matrices to invert. Shape (N, 4, 4).
 
     Returns:
         NDArray: the inverse of the matrices. Shape (N, 4, 4).
@@ -225,6 +225,10 @@ def homogeneous_inv_batch(matrices: NDArray) -> NDArray:
 _identity = np.eye(4)
 _identity.flags["WRITEABLE"] = False
 # modified from trimesh.scene.transforms.SceneGraph.get() to support batched scenes
+# https://github.com/mikedh/trimesh/blob/76b6dd1a2f552673b3b38ffd44ce4342d4e95273/trimesh/scene/transforms.py#L95
+# trimesh licence:
+# The MIT License (MIT)
+# Copyright (c) 2023 Michael Dawson-Haggerty
 def scene_graph_transform_get(
     scene_graph: SceneGraph, 
     frame_to: Hashable, 
@@ -673,7 +677,7 @@ def create_polygon_from_unordered_points(points: NDArray) -> Polygon:
     points = np.concatenate([points, points[0:1]], axis=0)
     return Polygon(points)
 
-def signed_angle(v1: NDArray, v2: NDArray):
+def signed_angle(v1: NDArray, v2: NDArray) -> NDArray:
     """
     Calculates the signed angle between two 2D vectors or batches of 2D vectors.
 
@@ -684,7 +688,7 @@ def signed_angle(v1: NDArray, v2: NDArray):
             or (N, 2) for a batch of N vectors.
 
     Returns:
-        The oriented angle(s) in radians. Returns a single float for single vectors,
+        NDArray: The oriented angle(s) in radians. Returns a single float for single vectors,
         or an array of shape (N,) for batched vectors.
     """
     # Ensure inputs are numpy arrays
