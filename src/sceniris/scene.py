@@ -4,7 +4,6 @@ from typing import Any
 
 import itertools
 import os
-import re
 import time
 import logging
 import networkx as nx
@@ -48,7 +47,7 @@ from sceniris.pose_generators import (
     PositionIterator2DCollection,
 )
 from sceniris.utils import (
-    point_to_translation_matrix,
+    batch_translation_matrix,
     get_support_transforms,
     get_support_node_names,
     get_transform_batch,
@@ -538,13 +537,13 @@ class Scene(_Scene):
                     if isinstance(support, np.ndarray):
                         # transform 3D coordinate with respect to the normalized surface to mesh frame
                         support_transforms = get_support_transforms(support)
-                        placement_T = support_transforms @ point_to_translation_matrix(pos3d) @ ori
+                        placement_T = support_transforms @ batch_translation_matrix(pos3d) @ ori
                         support_node_names = get_support_node_names(support)
                         parent_to_support_node = get_transform_batch(
                             self, support_node_names, frame_from=parent_id) # parent -> mesh
                         # support_node_names already has the same length as working_env_ids, so no need to index
                     elif isinstance(support, SupportSurface):
-                        placement_T = support.transform @ point_to_translation_matrix(pos3d) @ ori
+                        placement_T = support.transform @ batch_translation_matrix(pos3d) @ ori
                         parent_to_support_node = scene_graph_transform_get(
                             self._scene.graph, 
                             support.node_name,
@@ -573,7 +572,7 @@ class Scene(_Scene):
                 
                     world_T = world_to_parent @ placement_T # T_w_obj, (len(working_env_ids), 4, 4)
                 else:
-                    world_T = point_to_translation_matrix(pos3d) @ ori
+                    world_T = batch_translation_matrix(pos3d) @ ori
                     placement_T = world_T.copy()
                 
                 if isinstance(orientation_iterator, OrientationGeneratorFaceTo):

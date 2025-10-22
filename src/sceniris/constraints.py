@@ -2,7 +2,6 @@
 
 import numpy as np
 import time
-from itertools import product
 from numpy.typing import NDArray
 from typing import Literal
 from scipy.spatial import ConvexHull
@@ -14,7 +13,6 @@ from sceniris.utils import (
     angle_to_2d_rotation_matrix,
     create_polygon_from_unordered_points,
     create_ring_polygon, 
-    get_edge_point_from_bbox_corners,
     get_mesh_bbox_corners,
     get_min_xy_edge,
     resolve_multi_polygon,

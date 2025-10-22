@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
 
 import numpy as np
-from shapely import intersection, MultiPolygon, Polygon
+from shapely import MultiPolygon, Polygon
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 

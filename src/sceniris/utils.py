@@ -119,22 +119,6 @@ def sample_random_z_rotations(
     
     return rotation_matrices
 
-def point_to_translation_matrix(translations: NDArray) -> NDArray:
-    """
-    Creates a batch of 4x4 translation matrices from a batch of 3D coordinates.
-
-    Args:
-        translations: A NumPy array of shape (N, 3) where N is the batch size,
-                    and each row represents the (x, y, z) translation vector.
-
-    Returns:
-        NDArray: A NumPy array of shape (N, 4, 4) containing the translation matrices.
-    """
-    N = translations.shape[0]
-    matrices = np.tile(np.eye(4, dtype=translations.dtype), (N, 1, 1))
-    matrices[:, :3, 3] = translations
-    return matrices
-
 
 def check_within_polygon(polygon: Polygon, points: NDArray) -> NDArray:
     """
