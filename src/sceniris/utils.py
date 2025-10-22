@@ -17,18 +17,19 @@ from scene_synthesizer.constants import EDGE_KEY_METADATA
 
 def batch_rotation_matrix(angle: NDArray, direction: NDArray) -> NDArray:
     """
-    Creates a batch of rotation matrices from a batch of angles and directions.
+    Creates a batch of rotation matrices (in 4x4 homogeneous matrix) 
+        from a batch of angles and directions.
     Args:
         angle (NDArray): (N,) float, the angle of rotation.
         direction (NDArray): (N, 3) float, the direction of rotation.
 
     Returns:
-        NDArray: (N, 4, 4) float, the rotation matrices.
+        NDArray: (N, 4, 4) float, the rotation matrices (in 4x4 homogeneous matrix) .
     """
     N = len(angle)
     
     # Normalize direction
-    direction = direction / np.linalg.norm(direction, axis=1, keepdims=True)
+    direction = direction / (np.linalg.norm(direction, axis=1, keepdims=True) + 1e-5)
     
     # Create identity matrices
     I = np.eye(3)[None, :, :].repeat(N, axis=0)
@@ -54,19 +55,19 @@ def batch_rotation_matrix(angle: NDArray, direction: NDArray) -> NDArray:
     return matrices
 
 
-def batch_translation_matrix(direction: NDArray) -> NDArray:
+def batch_translation_matrix(translations: NDArray) -> NDArray:
     """
-    Creates a batch of translation matrices from a batch of 3D translations.
+    Creates a batch of 4x4 homogeneous matrices from a batch of 3D translations.
 
     Args:
-        direction (NDArray): (N, 3) float, the direction of translation.
+        translations (NDArray): (N, 3) float, translations.
 
     Returns:
         NDArray: (N, 4, 4) float, the translation matrices.
     """
-    N = direction.shape[0]
+    N = translations.shape[0]
     matrices = np.tile(np.eye(4), (N, 1, 1))
-    matrices[:, :3, 3] = direction
+    matrices[:, :3, 3] = translations
     return matrices
 
 

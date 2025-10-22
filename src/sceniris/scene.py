@@ -2165,10 +2165,10 @@ class Scene(_Scene):
         support_polyhedra = []
         support_polyhedra_mask = []
 
-        # Modified by <jshang>: do not use the entire scene, use the mesh it self
+        # do not use the entire scene, use the mesh it self
         # (see below in the for loop)
         # original version `scene_mesh = self._scene.dump(concatenate=True)`
-        # use the no relationship version so that all other objects are eliminated 
+        # use the no relationship version so that all other objects are eliminated
         # this is to ensure that the ray casting only consider the support object itself
         asset_mesh_cache = {}
 
