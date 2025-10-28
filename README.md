@@ -96,4 +96,4 @@ Scene_synthesizer (with 10 multiprocessing): **64** env instances in around 38 s
 [scene_synthesizer](https://github.com/NVlabs/scene_synthesizer), [curobo](https://curobo.org/)
 
 ### Maintainance Disclaimer
-The project will be under light maintenance. No feature development guaranteed. We welcome any bug reports or PRs help us to improve the project.
+The project will be under light maintenance. No feature development guaranteed. We welcome any bug reports or PRs that help us to improve the project.
