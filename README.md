@@ -12,10 +12,12 @@ Sceniris is a procedural scene generation framework that generates a massive amo
 ### Usage
 - From config
 ```
+import sceniris
 from sceniris.scene import Scene
 import os
 import logging
 logging.basicConfig(level=logging.INFO, force=True)
+example_asset_folder = os.path.join(os.path.dirname(sceniris.__file__), "example_assets")
 # give a config
 cfg = {
     "env": {
@@ -25,7 +27,7 @@ cfg = {
     "objects": [
         {
             "id": "orange",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/017_orange/textured/textured.usd"),
+            "asset_path": os.path.join(example_asset_folder, "orange.usd"),
             "constraints": [
                 {
                     "anchor_object_ids": ["drawer", "mug"],
@@ -35,7 +37,7 @@ cfg = {
         },
         {
             "id": "drawer",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/usd/unit_1/unit_1.usd"),
+            "asset_path": os.path.join(example_asset_folder, "drawer_unit_1.usd"),
             "joint_states": [
                 {
                     "joint_ids": ["drawer_joint_lower"],
@@ -53,13 +55,13 @@ cfg = {
         },
         {
             "id": "banana",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/011_banana/textured/textured.usd"),
+            "asset_path": os.path.join(example_asset_folder, "banana.usd"),
             "parent_id": "drawer/unit_1_upper_drawer", # might need to optimize the part name in trimesh scene
             "relation_to_parent": "top",
         },
         {
             "id": "mug",
-            "asset_path": os.path.expanduser("~/fm_storage/fm_assets/ycb_fixed_v2/025_mug/textured/textured.usd"),
+            "asset_path": os.path.join(example_asset_folder, "mug.usd"),
             "constraints": [
                 {
                     "anchor_object_ids": ["drawer"],
