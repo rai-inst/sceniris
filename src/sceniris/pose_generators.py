@@ -102,7 +102,7 @@ class OrientationGeneratorConst(PoseGenerator):
         self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
 
     def replenish(self) -> None:
-        self.sample_buffer = np.concatenate([self.sample_buffer, np.tile(self.orientation, (self.replenish_size, 1))])
+        self.sample_buffer = np.concatenate([self.sample_buffer, np.tile(self.orientation, (self.replenish_size, 1, 1))])
 
     def __next__(self):
         return self.sample(1)[0]
@@ -144,9 +144,7 @@ class OrientationGeneratorStablePoses(PoseGenerator):
         self.sample_buffer: NDArray | list = np.empty((0, 4, 4), dtype=np.float32)
 
     def replenish(self) -> None:
-        rotation_matrices = self.sample_buffer.extend(
-            self.asset.sample_stable_pose(seed=self.rng, num_samples=self.replenish_size, z_rotation=self.z_rotation, **self.kwargs)
-        )
+        rotation_matrices = self.asset.sample_stable_pose(seed=self.rng, num_samples=self.replenish_size, z_rotation=self.z_rotation, **self.kwargs)
         self.sample_buffer = np.concatenate([self.sample_buffer, rotation_matrices])
 
     def __next__(self):

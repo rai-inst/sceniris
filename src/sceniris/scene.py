@@ -1741,6 +1741,8 @@ class Scene(_Scene):
             parent_id = "_plane"
         
         relation_to_parent = obj_cfg.get("relation_to_parent", "top")
+        if relation_to_parent is None:
+            relation_to_parent = "top"
         constraints = obj_cfg.get("constraints", [])
 
         # support surface: composing support_id and label it if it does not exist
