@@ -1829,21 +1829,21 @@ class Scene(_Scene):
                     base_support_id = support_id
                 constraint = SurfaceRelation(
                     scene=self,
-                    asset_to_add = self.assets[obj_id],
-                    anchor_transforms = [
+                    asset_to_add=self.assets[obj_id],
+                    anchor_transforms=[
                         TrackingTransform(
                             parent_id=aoi,
                         ) for aoi in anchor_object_ids
                     ],
-                    base_support = self._scene.metadata["support_polygons"][base_support_id],
-                    direction = c.get("direction", None),
-                    direction_tolerance_angle = c.get("direction_tolerance_angle", 90.0),
-                    distance = c.get("distance", None),
-                    distance_type = c.get("distance_type", None),
-                    distance_relax = c.get("distance_relax", 0.01),
-                    distance_start_bbox = c.get("distance_start_bbox", False),
-                    max_mesh_projection_z = c.get("max_mesh_projection_z", 1.0),
-                    relation_axis_transform = c.get("relation_axis_transform", np.eye(4)),
+                    base_support=self._scene.metadata["support_polygons"][base_support_id],
+                    direction=c.get("direction", None),
+                    direction_tolerance_angle=c.get("direction_tolerance_angle", 90.0),
+                    distance=c.get("distance", None),
+                    distance_type=c.get("distance_type", None),
+                    distance_relax=c.get("distance_relax", 0.01),
+                    distance_start_bbox=c.get("distance_start_bbox", False),
+                    max_mesh_projection_z=c.get("max_mesh_projection_z", 1.0),
+                    relation_axis_transform=c.get("relation_axis_transform", np.eye(4)),
                 )
                 placement_args["constraint"].append(constraint)
                 self._all_constraints.append(constraint)
