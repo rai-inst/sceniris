@@ -3,6 +3,14 @@ Sceniris is a procedural scene generation framework that generates a massive amo
 
 ![teaser](media/teaser.png)
 
+### How fast is Sceniris
+To generate scenes from similar env configs:
+
+Sceniris: **16384** env instances (13000+ valid) in just 30 seconds
+
+Scene_synthesizer (with 10 multiprocessing): **64** env instances in around 38 seconds (our device is a VM with NVIDIA L4 GPU)
+![Execution time comparision](media/time.png)
+
 
 ### Installation
 
@@ -86,15 +94,6 @@ You can also refer to our [demo script](src/sceniris/scripts/tries/example.py).
 
 If the script works, it will generate the scenes similar to the image below:
 ![example_result](media/example_result.png)
-
-### How fast is Sceniris
-To generate scenes from similar env configs:
-
-Sceniris: **16384** env instances (13000+ valid) in just 30 seconds
-
-Scene_synthesizer (with 10 multiprocessing): **64** env instances in around 38 seconds (our device is a VM with NVIDIA L4 GPU)
-![Execution time comparision](media/time.png)
-
 
 
 ### Acknowledgement
