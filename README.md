@@ -79,7 +79,7 @@ cfg = {
 scene = Scene.gen_from_cfg(cfg) # initialize a scene
 scene.gen() # generate!!!
 poses, joint_states, valid_env_mask = scene.export_scene_to_poses_and_joint_states() # optionally, dump object poses, joint states, and valid environments data
-# scene.show(env_ids=np.arange(4)) # it will pop up a window for visualizing the generated scene
+# scene.show(env_ids=[0,1,2,3]) # it will pop up a window for visualizing the generated (without texture)
 ```
 
 You can also refer to our [demo script](src/sceniris/scripts/tries/example.py).
