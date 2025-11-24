@@ -1,5 +1,7 @@
 # Copyright (c) 2023 Boston Dynamics AI Institute LLC. All rights reserved.
 
+src/scripts/tries/benchmark
+benchmark/
 _huggingface/
 
 # Editors

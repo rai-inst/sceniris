@@ -58,12 +58,12 @@ cfg = {
     "objects": [
         {
             "id": "apple",
-            "asset_path": os.path.join(example_asset_dir, "apple.usd"),
-            'reachable': True,
+            "asset_path": os.path.join(example_asset_dir, "apple/apple.usd"),
+            'reachable': False, # # modify it to true if you want to use the reachability feature. rm4d is required
         },
         {
             "id": "drawer",
-            "asset_path": os.path.join(example_asset_dir, "drawer_unit_1.usd"),
+            "asset_path": os.path.join(example_asset_dir, "drawer_unit_1/drawer_unit_1.usd"),
             "joint_states": [
                 {
                     "joint_ids": ["drawer_joint_lower"],
@@ -81,10 +81,10 @@ cfg = {
         },
         {
             "id": "banana",
-            "asset_path": os.path.join(example_asset_dir, "banana.usd"),
+            "asset_path": os.path.join(example_asset_dir, "banana/banana.usd"),
             "parent_id": "drawer/unit_1_upper_drawer", # might need to optimize the part name in trimesh scene
             "relation_to_parent": "top",
-            "reachable": True,
+            "reachable": False, # modify it to true if you want to use the reachability feature. rm4d is required
         },
     ]
 }
@@ -98,7 +98,7 @@ if "env_size" not in cfg["env"]:
 
 REPEAT = 5
 
-benchmark_dir = os.path.join(args.benchmark_dir, args.cfg_level)
+benchmark_dir = args.benchmark_dir
 if args.distance_start_bbox:
     benchmark_dir = benchmark_dir + "_dsb"
 
