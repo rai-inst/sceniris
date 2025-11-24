@@ -21,13 +21,13 @@ example_asset_folder = os.path.join(os.path.dirname(sceniris.__file__), "example
 # give a config
 cfg = {
     "env": {
-        "num_envs": args.num_envs,
-        "env_size": args.env_size,
+        "num_envs": 4,
+        "env_size": 1.0,
     },
     "objects": [
         {
             "id": "orange",
-            "asset_path": os.path.join(example_asset_folder, "orange.usd"),
+            "asset_path": os.path.join(example_asset_folder, "orange/orange.usd"),
             "constraints": [
                 {
                     "anchor_object_ids": ["drawer", "mug"],
@@ -37,7 +37,7 @@ cfg = {
         },
         {
             "id": "drawer",
-            "asset_path": os.path.join(example_asset_folder, "drawer_unit_1.usd"),
+            "asset_path": os.path.join(example_asset_folder, "drawer_unit_1/drawer_unit_1.usd"),
             "joint_states": [
                 {
                     "joint_ids": ["drawer_joint_lower"],
@@ -55,13 +55,13 @@ cfg = {
         },
         {
             "id": "banana",
-            "asset_path": os.path.join(example_asset_folder, "banana.usd"),
+            "asset_path": os.path.join(example_asset_folder, "banana/banana.usd"),
             "parent_id": "drawer/unit_1_upper_drawer", # might need to optimize the part name in trimesh scene
             "relation_to_parent": "top",
         },
         {
             "id": "mug",
-            "asset_path": os.path.join(example_asset_folder, "mug.usd"),
+            "asset_path": os.path.join(example_asset_folder, "mug/mug.usd"),
             "constraints": [
                 {
                     "anchor_object_ids": ["drawer"],
@@ -77,6 +77,7 @@ cfg = {
 scene = Scene.gen_from_cfg(cfg) # initialize a scene
 scene.gen() # generate!!!
 poses, joint_states, valid_env_mask = scene.export_scene_to_poses_and_joint_states() # optionally, dump object poses, joint states, and valid environments data
+# scene.show(env_ids=np.arange(4)) # it will pop up a window for visualizing the generated scene
 ```
 
 - By step-by-step coding
