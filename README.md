@@ -84,6 +84,8 @@ poses, joint_states, valid_env_mask = scene.export_scene_to_poses_and_joint_stat
 
 You can also refer to our [demo script](src/sceniris/scripts/tries/example.py).
 
+If the script works, it will generate the scenes similar to the image below:
+![example_result](media/example_result.png)
 
 ### How fast is Sceniris
 For a similar env config:
