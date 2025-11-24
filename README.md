@@ -80,8 +80,7 @@ poses, joint_states, valid_env_mask = scene.export_scene_to_poses_and_joint_stat
 # scene.show(env_ids=np.arange(4)) # it will pop up a window for visualizing the generated scene
 ```
 
-- By step-by-step coding
-[Example code](src/sceniris/scripts/tries/try_mid_scene.py)
+You can also refer to our [demo script](src/sceniris/scripts/tries/example.py).
 
 
 ### How fast is Sceniris
