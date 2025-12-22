@@ -1,4 +1,17 @@
-## Sceniris: a fast procedural scene generation framework
+<h1 align="center">Sceniris: a Fast Procedural Scene Generation Framework</h1>
+
+<h4 align="center">
+    <a href="https://www3.cs.stonybrook.edu/~jishang" target="_blank">Jinghuan Shang</a><sup>1</sup>, <a href="https://harshp30.github.io/Website/", target="_blank">Harsh Petal</a><sup>2</sup>, <a href="https://nikepupu.github.io" target="_blank">Ran Gong</a><sup>1</sup>, <a href="https://sites.google.com/view/karlschmeckpeper" target="_blank">Karl Schmeckpeper</a><sup>1</sup>
+</h4>
+<p align="center">
+<sup>1</sup><a href="http://rai-inst.com/" target="_blank">Robotics and AI Institute</a>
+<sup>2</sup>University of Waterloo
+</p>
+
+<p align="center">
+<a href="https://arxiv.org/abs/2512.16896" target="_blank">[Paper]</a>
+</p>
+
 Sceniris is a procedural scene generation framework that generates a massive amount of collision-free environment instances in a short time. [How fast?](#how-fast-is-sceniris). The framework is developed on top of [scene_synthesizer](https://github.com/NVlabs/scene_synthesizer) and [curobo](https://curobo.org/). Sceniris also supports more spatial relationships than scene_synthesizer. The speedup mainly comes from three aspects: batched sampling, batched pose computation & forward kinematics, and curobo's parallel collision checking.
 
 ![teaser](media/teaser.png)
