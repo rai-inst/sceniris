@@ -1,7 +1,7 @@
 <h1 align="center">Sceniris: a Fast Procedural Scene Generation Framework</h1>
 
 <h4 align="center">
-    <a href="https://www3.cs.stonybrook.edu/~jishang" target="_blank">Jinghuan Shang</a><sup>1</sup>, <a href="https://harshp30.github.io/Website/", target="_blank">Harsh Petal</a><sup>2</sup>, <a href="https://nikepupu.github.io" target="_blank">Ran Gong</a><sup>1</sup>, <a href="https://sites.google.com/view/karlschmeckpeper" target="_blank">Karl Schmeckpeper</a><sup>1</sup>
+    <a href="https://www3.cs.stonybrook.edu/~jishang" target="_blank">Jinghuan Shang</a><sup>1</sup>, <a href="https://harshp30.github.io/Website/", target="_blank">Harsh Patel</a><sup>2</sup>, <a href="https://nikepupu.github.io" target="_blank">Ran Gong</a><sup>1</sup>, <a href="https://sites.google.com/view/karlschmeckpeper" target="_blank">Karl Schmeckpeper</a><sup>1</sup>
 </h4>
 <p align="center">
 <sup>1</sup><a href="http://rai-inst.com/" target="_blank">Robotics and AI Institute</a>
